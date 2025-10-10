@@ -1,0 +1,78 @@
+# Build directory
+build/
+
+# ESP-IDF build artifacts
+*.bin
+*.elf
+*.map
+*.log
+*.hex
+
+# CMake build files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# Object files
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Python cache (if using Python scripts)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Log files
+*.log
+logs/
+
+# Configuration backup files
+sdkconfig.old
+sdkconfig.bak
+
+# Partition table backup
+partitions.csv.bak
+
+# Flash download tool logs
+flash_args
+
+# ESP-IDF specific
+managed_components/
+dependencies.lock
+
+# Compiler generated files
+*.d
+*.dep
+
+# Archive files
+*.tar.gz
+*.zip
+*.rar
+
+# Documentation build
+docs/_build/
