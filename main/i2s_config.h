@@ -16,7 +16,8 @@
 
 // Audio configuration
 #define SAMPLE_RATE 192000 
-#define BITS_PER_SAMPLE (i2s_bits_per_sample_t) 32
+#define BITS_PER_SAMPLE (i2s_bits_per_sample_t) 24
+#define BITS_PER_CHAN 32  // 24-bit samples transmitted in 32-bit slots
 #define CHANNELS 2
 
 // Buffer configuration

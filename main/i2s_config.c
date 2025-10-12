@@ -16,7 +16,7 @@ esp_err_t i2s_dac_init(void) {
     i2s_config_t i2s_config = {
         .mode = I2S_MODE_SLAVE | I2S_MODE_TX,
         .sample_rate = SAMPLE_RATE,
-        .bits_per_sample = 16,
+        .bits_per_sample = BITS_PER_SAMPLE,
         .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
@@ -24,7 +24,8 @@ esp_err_t i2s_dac_init(void) {
         .dma_buf_len = BUFFER_SIZE,
         .use_apll = true,
         .tx_desc_auto_clear = true,
-        .fixed_mclk = 0
+        .fixed_mclk = 0,
+        .bits_per_chan = BITS_PER_CHAN
     };
 
     i2s_pin_config_t pin_config = {
@@ -47,7 +48,7 @@ esp_err_t i2s_dac_init(void) {
         return ret;
     }
 
-    i2s_set_clk(I2S_NUM, SAMPLE_RATE, 16, I2S_CHANNEL_STEREO);
+    i2s_set_clk(I2S_NUM, SAMPLE_RATE, BITS_PER_CHAN, I2S_CHANNEL_STEREO);
     
     ret = i2s_zero_dma_buffer(I2S_NUM);
     if (ret != ESP_OK) {
@@ -77,7 +78,8 @@ esp_err_t i2s_adc_init(void) {
         .dma_buf_len = BUFFER_SIZE,
         .use_apll = false,
         .tx_desc_auto_clear = false,
-        .fixed_mclk = 0
+        .fixed_mclk = 0,
+        .bits_per_chan = BITS_PER_CHAN
     };
 
     i2s_pin_config_t slave_pin_config = {
@@ -101,7 +103,7 @@ esp_err_t i2s_adc_init(void) {
         return ret;
     }
 
-    i2s_set_clk(I2S_ADC_NUM, SAMPLE_RATE, BITS_PER_SAMPLE, I2S_CHANNEL_STEREO);
+    i2s_set_clk(I2S_ADC_NUM, SAMPLE_RATE, BITS_PER_CHAN, I2S_CHANNEL_STEREO);
     
     ret = i2s_zero_dma_buffer(I2S_ADC_NUM);
     if (ret != ESP_OK) {

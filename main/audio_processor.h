@@ -46,10 +46,10 @@ void audio_processor_cleanup(void);
 
 /**
  * @brief Process audio samples (channel swap and volume scaling)
- * @param samples Pointer to audio samples buffer
+ * @param samples Pointer to audio samples buffer (24-bit in 32-bit containers)
  * @param sample_count Number of samples to process
  * @param config Audio processing configuration
  */
-void audio_process_samples(int16_t *samples, size_t sample_count, const audio_config_t *config);
+void audio_process_samples(int32_t *samples, size_t sample_count, const audio_config_t *config);
 
 #endif // AUDIO_PROCESSOR_H

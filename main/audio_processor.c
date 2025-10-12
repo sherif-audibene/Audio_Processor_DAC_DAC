@@ -10,14 +10,15 @@ static const char *TAG = "AUDIO_PROCESSOR";
 
 // Private variables
 static TaskHandle_t audio_task_handle = NULL;
-static int16_t *audio_buffer = NULL;
+static int32_t *audio_buffer = NULL;
 static audio_config_t current_config;
 static bool audio_initialized = false;
 
 /**
  * @brief Process audio samples with channel swap and volume scaling
+ * Note: 24-bit samples are stored in 32-bit containers (int32_t)
  */
-void audio_process_samples(int16_t *samples, size_t sample_count, const audio_config_t *config) {
+void audio_process_samples(int32_t *samples, size_t sample_count, const audio_config_t *config) {
     if (!samples || sample_count == 0 || !config) {
         return;
     }
@@ -26,17 +27,17 @@ void audio_process_samples(int16_t *samples, size_t sample_count, const audio_co
     for (size_t i = 0; i < sample_count; i += 2) {
         if (i + 1 >= sample_count) break; // Ensure we have a stereo pair
         
-        int16_t left_sample = samples[i];
-        int16_t right_sample = samples[i + 1];
+        int32_t left_sample = samples[i];
+        int32_t right_sample = samples[i + 1];
         
         if (config->enable_channel_swap) {
             // Swap channels: right becomes left, left becomes right
-            samples[i] = (int16_t)(right_sample * config->volume_scale);
-            samples[i + 1] = (int16_t)(left_sample * config->volume_scale);
+            samples[i] = (int32_t)(right_sample * config->volume_scale);
+            samples[i + 1] = (int32_t)(left_sample * config->volume_scale);
         } else {
             // Apply volume scaling without channel swap
-            samples[i] = (int16_t)(left_sample * config->volume_scale);
-            samples[i + 1] = (int16_t)(right_sample * config->volume_scale);
+            samples[i] = (int32_t)(left_sample * config->volume_scale);
+            samples[i + 1] = (int32_t)(right_sample * config->volume_scale);
         }
     }
 }
@@ -48,7 +49,7 @@ static void audio_passthrough_task(void *pvParameters) {
     size_t bytes_read;
     size_t bytes_written;
     esp_err_t ret;
-    const size_t read_write_size = BUFFER_SIZE * CHANNELS * sizeof(int16_t);
+    const size_t read_write_size = BUFFER_SIZE * CHANNELS * sizeof(int32_t);
     static int debug_counter = 0;
 
     ESP_LOGI(TAG, "Audio passthrough task started");
@@ -106,16 +107,16 @@ static void audio_passthrough_task(void *pvParameters) {
 
         // Debug logging
         if (current_config.enable_debug && (debug_counter++ % AUDIO_DEBUG_INTERVAL == 0)) {
-            if (bytes_read >= 4) {
-                int16_t *samples = (int16_t *)audio_buffer;
-                ESP_LOGI(TAG, "Sample (L, R) @ %u Hz: (%d, %d)", 
-                         SAMPLE_RATE, samples[0], samples[1]);
+            if (bytes_read >= 8) {
+                int32_t *samples = (int32_t *)audio_buffer;
+                ESP_LOGI(TAG, "Sample (L, R) @ %u Hz: (%ld, %ld)", 
+                         SAMPLE_RATE, (long)samples[0], (long)samples[1]);
             }
         }
         
         // Process audio samples
-        int16_t *samples = (int16_t *)audio_buffer;
-        size_t sample_count = bytes_read / sizeof(int16_t);
+        int32_t *samples = (int32_t *)audio_buffer;
+        size_t sample_count = bytes_read / sizeof(int32_t);
         audio_process_samples(samples, sample_count, &current_config);
 
         // Write to DAC
@@ -147,8 +148,8 @@ esp_err_t audio_processor_init(const audio_config_t *config) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Allocate audio buffer
-    audio_buffer = malloc(BUFFER_SIZE * CHANNELS * sizeof(int16_t));
+    // Allocate audio buffer for 24-bit samples (stored in 32-bit containers)
+    audio_buffer = malloc(BUFFER_SIZE * CHANNELS * sizeof(int32_t));
     if (audio_buffer == NULL) {
         ESP_LOGE(TAG, "Failed to allocate audio buffer");
         return ESP_ERR_NO_MEM;
