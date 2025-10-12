@@ -32,11 +32,11 @@ void audio_process_samples(int32_t *samples, size_t sample_count, const audio_co
         
         if (config->enable_channel_swap) {
             // Swap channels: right becomes left, left becomes right
-            samples[i] = (int32_t)(right_sample * config->volume_scale);
+            samples[i] = (int32_t)(right_sample * config->volume_scale*2);
             samples[i + 1] = (int32_t)(left_sample * config->volume_scale);
         } else {
             // Apply volume scaling without channel swap
-            samples[i] = (int32_t)(left_sample * config->volume_scale);
+            samples[i] = (int32_t)(left_sample * config->volume_scale*2);
             samples[i + 1] = (int32_t)(right_sample * config->volume_scale);
         }
     }
@@ -119,6 +119,7 @@ static void audio_passthrough_task(void *pvParameters) {
         size_t sample_count = bytes_read / sizeof(int32_t);
         audio_process_samples(samples, sample_count, &current_config);
 
+        
         // Write to DAC
         ret = i2s_write(I2S_NUM, audio_buffer, bytes_read, &bytes_written, 
                        pdMS_TO_TICKS(AUDIO_WRITE_TIMEOUT_MS));
