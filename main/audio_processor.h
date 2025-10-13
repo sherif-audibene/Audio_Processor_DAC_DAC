@@ -19,6 +19,10 @@ typedef struct {
     float volume_scale;
     bool enable_debug;
     bool enable_channel_swap;
+    bool enable_delay;           // Enable/disable delay effect
+    float delay_time_ms;         // Delay time in milliseconds (e.g., 250ms)
+    float delay_mix;             // Delay mix amount (0.0 to 1.0)
+    float delay_feedback;        // Feedback amount (0.0 to 0.9) - how much delayed signal feeds back
 } audio_config_t;
 
 /**

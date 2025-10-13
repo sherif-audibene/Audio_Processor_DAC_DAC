@@ -1,6 +1,7 @@
 #include "audio_processor.h"
 #include "i2s_config.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/task.h"
 #include "driver/i2s.h"
 #include <string.h>
@@ -14,8 +15,13 @@ static int32_t *audio_buffer = NULL;
 static audio_config_t current_config;
 static bool audio_initialized = false;
 
+// Delay effect variables
+static int32_t *delay_buffer = NULL;
+static size_t delay_buffer_size = 0;
+static size_t delay_write_pos = 0;
+
 /**
- * @brief Process audio samples with channel swap and volume scaling
+ * @brief Process audio samples with channel swap, volume scaling, and delay effect
  * Note: 24-bit samples are stored in 32-bit containers (int32_t)
  */
 void audio_process_samples(int32_t *samples, size_t sample_count, const audio_config_t *config) {
@@ -30,6 +36,47 @@ void audio_process_samples(int32_t *samples, size_t sample_count, const audio_co
         int32_t left_sample = samples[i];
         int32_t right_sample = samples[i + 1];
         
+        // Apply delay effect if enabled
+        if (config->enable_delay && delay_buffer != NULL && delay_buffer_size > 0) {
+            // Calculate delay offset in samples (stereo pairs)
+            size_t delay_samples = (size_t)((config->delay_time_ms / 1000.0f) * 48000.0f * 2); // *2 for stereo
+            delay_samples = (delay_samples / 2) * 2; // Ensure even number (stereo pairs)
+            
+            if (delay_samples > delay_buffer_size) {
+                delay_samples = delay_buffer_size;
+            }
+            
+            // Only apply delay if we have enough samples
+            if (delay_samples > 0) {
+                // Calculate read position (circular buffer)
+                size_t delay_read_pos = (delay_write_pos >= delay_samples) ? 
+                                        (delay_write_pos - delay_samples) : 
+                                        (delay_buffer_size - (delay_samples - delay_write_pos));
+                
+                // Read delayed samples
+                int32_t delayed_left = delay_buffer[delay_read_pos];
+                int32_t delayed_right = delay_buffer[delay_read_pos + 1];
+                
+                // Mix delayed signal with input
+                left_sample = (int32_t)(left_sample + (delayed_left * config->delay_mix));
+                right_sample = (int32_t)(right_sample + (delayed_right * config->delay_mix));
+            }
+            
+            // Write original input to delay buffer (not the mixed output!)
+            // Store the dry signal plus feedback from the delayed signal
+            int32_t delayed_left_fb = delay_buffer[delay_write_pos];
+            int32_t delayed_right_fb = delay_buffer[delay_write_pos + 1];
+            delay_buffer[delay_write_pos] = samples[i] + (int32_t)(delayed_left_fb * config->delay_feedback);
+            delay_buffer[delay_write_pos + 1] = samples[i + 1] + (int32_t)(delayed_right_fb * config->delay_feedback);
+            
+            // Advance write position (circular buffer)
+            delay_write_pos += 2;
+            if (delay_write_pos >= delay_buffer_size) {
+                delay_write_pos = 0;
+            }
+        }
+        
+        // Apply channel swap and volume
         if (config->enable_channel_swap) {
             // Swap channels: right becomes left, left becomes right
             samples[i] = (int32_t)(right_sample * config->volume_scale*2);
@@ -51,6 +98,8 @@ static void audio_passthrough_task(void *pvParameters) {
     esp_err_t ret;
     const size_t read_write_size = BUFFER_SIZE * CHANNELS * sizeof(int32_t);
     static int debug_counter = 0;
+    static int write_counter = 0;
+    static int64_t last_time = 0;
 
     ESP_LOGI(TAG, "Audio passthrough task started");
 
@@ -105,14 +154,6 @@ static void audio_passthrough_task(void *pvParameters) {
             continue;
         }
 
-        // Debug logging
-        if (current_config.enable_debug && (debug_counter++ % AUDIO_DEBUG_INTERVAL == 0)) {
-            if (bytes_read >= 8) {
-                int32_t *samples = (int32_t *)audio_buffer;
-                ESP_LOGI(TAG, "Sample (L, R) @ %u Hz: (%ld, %ld)", 
-                         SAMPLE_RATE, (long)samples[0], (long)samples[1]);
-            }
-        }
         
         // Process audio samples
         int32_t *samples = (int32_t *)audio_buffer;
@@ -135,7 +176,28 @@ static void audio_passthrough_task(void *pvParameters) {
                     (unsigned int)bytes_written, (unsigned int)bytes_read);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1));
+        // Track i2s_write calls per second
+/*         write_counter++;
+        int64_t current_time = esp_timer_get_time(); // microseconds
+        if (last_time == 0) {
+            last_time = current_time;
+        }
+        if ((current_time - last_time) >= 1000000) { // 1 second elapsed
+            ESP_LOGI(TAG, "i2s_write calls/sec: %d", write_counter);
+            // Print the content of audio_buffer (interpreted as int32_t samples)
+            {
+                size_t num_samples = bytes_read / sizeof(int32_t);
+                int32_t *samples = (int32_t *)audio_buffer;
+                ESP_LOGI(TAG, "audio_buffer (first %u samples):", (unsigned int)num_samples < 16 ? (unsigned int)num_samples : 16);
+                for (size_t i = 0; i < num_samples && i < 16; ++i) {
+                    ESP_LOGI(TAG, "[%u]: %ld", (unsigned int)i, (long)samples[i]);
+                }
+            }
+            write_counter = 0;
+            last_time = current_time;
+        } */
+
+        //vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
@@ -155,6 +217,21 @@ esp_err_t audio_processor_init(const audio_config_t *config) {
         ESP_LOGE(TAG, "Failed to allocate audio buffer");
         return ESP_ERR_NO_MEM;
     }
+
+    // Allocate delay buffer (500ms max delay at 48kHz stereo = ~96KB)
+    const size_t max_delay_samples = 48000 / 2 * 2; // 500ms at 48kHz, stereo (48KB samples = 192KB)
+    delay_buffer_size = max_delay_samples;
+    delay_buffer = (int32_t *)calloc(delay_buffer_size, sizeof(int32_t));
+    if (delay_buffer == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate delay buffer (%u bytes)", 
+                 (unsigned int)(delay_buffer_size * sizeof(int32_t)));
+        free(audio_buffer);
+        return ESP_ERR_NO_MEM;
+    }
+    delay_write_pos = 0;
+    ESP_LOGI(TAG, "Delay buffer allocated: %u samples (%u KB)", 
+             (unsigned int)delay_buffer_size, 
+             (unsigned int)(delay_buffer_size * sizeof(int32_t) / 1024));
 
     // Store configuration
     memcpy(&current_config, config, sizeof(audio_config_t));
@@ -202,6 +279,13 @@ void audio_processor_cleanup(void) {
     if (audio_buffer != NULL) {
         free(audio_buffer);
         audio_buffer = NULL;
+    }
+    
+    if (delay_buffer != NULL) {
+        free(delay_buffer);
+        delay_buffer = NULL;
+        delay_buffer_size = 0;
+        delay_write_pos = 0;
     }
     
     i2s_dac_cleanup();

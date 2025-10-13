@@ -17,7 +17,11 @@ void app_main(void) {
     audio_config_t audio_config = {
         .volume_scale = 0.5f,
         .enable_debug = true,
-        .enable_channel_swap = true
+        .enable_channel_swap = true,
+        .enable_delay = true,          // Enable delay effect
+        .delay_time_ms = 250.0f,       // 250ms delay time
+        .delay_mix = 0.9f,             // 30% wet signal
+        .delay_feedback = 0.4f         // 40% feedback for multiple echoes
     };
 
     // Initialize audio processor
