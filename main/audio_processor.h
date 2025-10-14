@@ -2,15 +2,7 @@
 #define AUDIO_PROCESSOR_H
 
 #include "esp_err.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-// Audio processing configuration
-#define AUDIO_TASK_STACK_SIZE 4096
-#define AUDIO_TASK_PRIORITY 5
-#define AUDIO_READ_TIMEOUT_MS 1000
-#define AUDIO_WRITE_TIMEOUT_MS 100
-#define AUDIO_DEBUG_INTERVAL 100
+#include <stdbool.h>
 
 /**
  * @brief Audio processing configuration structure
@@ -19,10 +11,10 @@ typedef struct {
     float volume_scale;
     bool enable_debug;
     bool enable_channel_swap;
-    bool enable_delay;           // Enable/disable delay effect
-    float delay_time_ms;         // Delay time in milliseconds (e.g., 250ms)
-    float delay_mix;             // Delay mix amount (0.0 to 1.0)
-    float delay_feedback;        // Feedback amount (0.0 to 0.9) - how much delayed signal feeds back
+    bool enable_delay;
+    float delay_time_ms;
+    float delay_mix;
+    float delay_feedback;
 } audio_config_t;
 
 /**
@@ -33,13 +25,13 @@ typedef struct {
 esp_err_t audio_processor_init(const audio_config_t *config);
 
 /**
- * @brief Start audio processing task
+ * @brief Start audio processing
  * @return ESP_OK on success, error code on failure
  */
 esp_err_t audio_processor_start(void);
 
 /**
- * @brief Stop audio processing task
+ * @brief Stop audio processing
  */
 void audio_processor_stop(void);
 
@@ -49,11 +41,9 @@ void audio_processor_stop(void);
 void audio_processor_cleanup(void);
 
 /**
- * @brief Process audio samples (channel swap and volume scaling)
- * @param samples Pointer to audio samples buffer (24-bit in 32-bit containers)
- * @param sample_count Number of samples to process
- * @param config Audio processing configuration
+ * @brief Update audio processing configuration
+ * @param config New audio processing configuration
  */
-void audio_process_samples(int32_t *samples, size_t sample_count, const audio_config_t *config);
+void audio_processor_update_config(const audio_config_t *config);
 
 #endif // AUDIO_PROCESSOR_H
