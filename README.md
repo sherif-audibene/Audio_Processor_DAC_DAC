@@ -5,9 +5,15 @@ An ESP32-S3 based audio processing system that reads audio from an external ADC 
 ## Features
 
 - **Real-time Audio Passthrough**: Continuous audio streaming from ADC to DAC
+- **LCD Waveform Display**: Real-time oscilloscope-style visualization on 128x64 ST7567S display
+  - Configurable waveform resolution
+  - Adjustable amplitude scaling (10-200%)
+  - Optional grid and center line display
+  - 30 FPS refresh rate
 - **Configurable Audio Processing**:
   - Volume scaling (0.0 to 1.0)
   - Channel swapping (left/right)
+  - Delay effects with configurable feedback
   - Debug logging with sample rate monitoring
 - **High-Quality Audio**: 192 kHz sample rate, 32-bit ADC input, 16-bit DAC output
 - **Dual I2S Configuration**: Separate I2S peripherals for ADC (slave) and DAC (master)
@@ -27,6 +33,12 @@ An ESP32-S3 based audio processing system that reads audio from an external ADC 
 - LRCK (Word Select): GPIO 37 (shared with DAC)
 - DATA: GPIO 35
 
+**LCD Display (I2C - ST7567S 128x64)**:
+- SDA: GPIO 6
+- SCL: GPIO 7
+- VCC: 3.3V or 5V (module dependent)
+- GND: Ground
+
 ### Audio Specifications
 
 - **Sample Rate**: 192,000 Hz
@@ -39,12 +51,22 @@ An ESP32-S3 based audio processing system that reads audio from an external ADC 
 
 ```
 main/
-├── main.c              # Application entry point and configuration
-├── audio_processor.c   # Audio processing logic and task management
-├── audio_processor.h   # Audio processing API definitions
-├── i2s_config.c        # I2S peripheral configuration
-├── i2s_config.h        # I2S pin definitions and constants
-└── CMakeLists.txt      # Component build configuration
+├── main.c                  # Application entry point and configuration
+├── audio_processor.c       # Audio processing logic and task management
+├── audio_processor.h       # Audio processing API definitions
+├── audio_task.c            # Audio passthrough task implementation
+├── audio_task.h            # Audio task API definitions
+├── audio_buffer_manager.c  # Audio buffer management
+├── audio_buffer_manager.h  # Buffer management API
+├── audio_effects.c         # Audio effects (delay, reverb, etc.)
+├── audio_effects.h         # Effects API definitions
+├── lcd_display.c           # ST7567S LCD driver (low-level)
+├── lcd_display.h           # LCD driver API
+├── lcd_task.c              # LCD display task (waveform rendering)
+├── lcd_task.h              # LCD task API
+├── i2s_config.c            # I2S peripheral configuration
+├── i2s_config.h            # I2S pin definitions and constants
+└── CMakeLists.txt          # Component build configuration
 ```
 
 ## Key Components
@@ -67,15 +89,42 @@ main/
 
 ## Configuration
 
+### Audio Processing
+
 The audio processing can be configured through the `audio_config_t` structure:
 
 ```c
 audio_config_t audio_config = {
     .volume_scale = 0.5f,           // Volume scaling (0.0 to 1.0)
     .enable_debug = true,           // Enable debug logging
-    .enable_channel_swap = true     // Swap left/right channels
+    .enable_channel_swap = true,    // Swap left/right channels
+    .enable_delay = true,           // Enable delay effect
+    .delay_time_ms = 250.0f,        // Delay time in milliseconds
+    .delay_mix = 0.9f,              // Wet/dry mix
+    .delay_feedback = 0.4f          // Feedback amount
 };
 ```
+
+### LCD Display
+
+The LCD waveform display can be configured through the `lcd_task_config_t` structure:
+
+```c
+lcd_task_config_t lcd_config = {
+    .sda_pin = 6,                   // I2C SDA pin
+    .scl_pin = 7,                   // I2C SCL pin
+    .lcd_contrast = 35,             // Contrast (0-63)
+    .waveform = {
+        .samples_per_screen = 128,  // Resolution (32-256)
+        .amplitude_scale = 100,     // Amplitude zoom (10-200%)
+        .show_grid = true,          // Show grid lines
+        .show_center_line = true,   // Show center reference
+        .mode = WAVEFORM_MODE_OSCILLOSCOPE
+    }
+};
+```
+
+For detailed LCD configuration and usage, see [LCD_DISPLAY_GUIDE.md](LCD_DISPLAY_GUIDE.md).
 
 ## Building and Flashing
 
@@ -84,6 +133,7 @@ audio_config_t audio_config = {
 - ESP32-S3 development board
 - External ADC with master clock (AliExpress module)
 - External DAC
+- ST7567S 128x64 I2C LCD Module (12864 IIC 4P) - Optional
 
 ### Build Commands
 ```bash
@@ -102,10 +152,24 @@ idf.py monitor
 
 ## Usage
 
-1. **Hardware Setup**: Connect the external ADC and DAC modules according to the pin mapping
+1. **Hardware Setup**: 
+   - Connect the external ADC and DAC modules according to the pin mapping
+   - Connect the LCD display to GPIO 6 (SDA) and GPIO 7 (SCL)
 2. **Power On**: The system will automatically initialize and start audio processing
 3. **Audio Flow**: Audio from the ADC is processed and output to the DAC in real-time
-4. **Debug Monitoring**: Use serial monitor to view audio processing status and sample data
+4. **Waveform Display**: The LCD shows real-time oscilloscope view of the audio signal
+5. **Debug Monitoring**: Use serial monitor to view audio processing status and sample data
+
+### Adjusting Waveform Display
+
+You can modify waveform display settings in `main.c`:
+
+- **Resolution**: Change `samples_per_screen` (32-256) for time zoom
+- **Amplitude**: Adjust `amplitude_scale` (10-200%) for vertical zoom
+- **Visual Aids**: Toggle `show_grid` and `show_center_line`
+- **Contrast**: Modify `lcd_contrast` (0-63) for optimal visibility
+
+See [LCD_DISPLAY_GUIDE.md](LCD_DISPLAY_GUIDE.md) for detailed configuration examples.
 
 ## Audio Processing Features
 
@@ -116,6 +180,18 @@ idf.py monitor
 ### Channel Swapping
 - Optional left/right channel swapping
 - Useful for correcting wiring or audio source orientation
+
+### Delay Effects
+- Configurable delay time (0-1000ms)
+- Adjustable wet/dry mix
+- Feedback control for echo effects
+
+### Waveform Visualization
+- Real-time oscilloscope display on LCD
+- 30 FPS refresh rate
+- Configurable resolution and scaling
+- Grid and reference lines
+- Low CPU overhead (~2-3%)
 
 ### Debug Logging
 - Periodic logging of audio samples (every 100 samples by default)
@@ -137,6 +213,11 @@ idf.py monitor
 2. **Distorted Audio**: Verify ADC input levels and clock synchronization
 3. **High CPU Usage**: Reduce debug logging frequency
 4. **Audio Dropouts**: Check buffer sizes and DMA configuration
+5. **LCD Not Working**: 
+   - Verify I2C connections (GPIO 6 & 7)
+   - Check LCD I2C address (default 0x3F)
+   - Ensure proper power supply to LCD
+   - See [LCD_DISPLAY_GUIDE.md](LCD_DISPLAY_GUIDE.md) for detailed troubleshooting
 
 ### Debug Information
 

@@ -2,6 +2,7 @@
 #include "audio_effects.h"
 #include "audio_buffer_manager.h"
 #include "i2s_config.h"
+#include "lcd_task.h"
 #include "esp_log.h"
 #include "driver/i2s.h"
 #include "freertos/task.h"
@@ -78,6 +79,9 @@ static void audio_passthrough_task(void *pvParameters) {
         // Process audio samples with effects
         size_t sample_count = bytes_read / sizeof(int32_t);
         audio_effects_process(audio_buffer, sample_count);
+
+        // LCD task reads directly from audio_buffer - no need to send data!
+        // The buffer is shared and protected by mutex
 
         // Write to DAC
         ret = i2s_write(I2S_NUM, audio_buffer, bytes_read, &bytes_written, 
