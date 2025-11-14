@@ -95,7 +95,7 @@ The audio processing can be configured through the `audio_config_t` structure:
 
 ```c
 audio_config_t audio_config = {
-    .volume_scale = 0.5f,           // Volume scaling (0.0 to 1.0)
+    .volume_scale = 0.8f,           // Volume scaling (0.0 to 1.0)
     .enable_debug = true,           // Enable debug logging
     .enable_channel_swap = true,    // Swap left/right channels
     .enable_delay = true,           // Enable delay effect

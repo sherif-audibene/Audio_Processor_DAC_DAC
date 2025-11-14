@@ -5,6 +5,7 @@
 #include "lcd_task.h"
 #include "lcd_display.h"
 #include "i2c_scanner.h"
+#include "led_control.h"
 #include "driver/i2c.h"
 
 static const char *TAG = "MAIN";
@@ -28,11 +29,11 @@ void app_main(void) {
         .scl_io_num = 7,
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 100000,
+        .master.clk_speed = 400000,
     };
     
     esp_err_t ret = i2c_param_config(I2C_NUM_0, &i2c_conf);
-    if (ret == ESP_OK) {
+    if (ret == ESP_OK) {    
         ret = i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
         if (ret == ESP_OK) {
             uint8_t detected_addr = 0;
@@ -54,8 +55,8 @@ void app_main(void) {
         .sda_pin = 6,
         .scl_pin = 7,
         .i2c_address = 0x3F,
-        .i2c_freq_hz = 100000,
-        .contrast = 35,
+        .i2c_freq_hz = 400000,
+        .contrast = 20,
         .flip_horizontal = false,
         .flip_vertical = false
     };
@@ -79,11 +80,11 @@ void app_main(void) {
     lcd_task_config_t lcd_config = {
         .sda_pin = 6,                    // SDA on GPIO 6
         .scl_pin = 7,                    // SCL on GPIO 7
-        .lcd_contrast = 35,              // Contrast level (0-63)
+        .lcd_contrast = 20,              // Contrast level (0-63)
         .waveform = {
-            .samples_per_screen = 128,   // Display 128 samples across screen
+            .samples_per_screen = 10000,   // Display 256 samples (MAX) for zoomed out view
             .time_scale = 1,             // Time scale multiplier
-            .amplitude_scale = 100,      // 100% amplitude scale
+            .amplitude_scale = 100,       // 50% amplitude scale (zoom out vertically)
             .show_grid = true,           // Show grid lines
             .show_center_line = true,    // Show center reference line
             .mode = WAVEFORM_MODE_OSCILLOSCOPE
@@ -100,13 +101,38 @@ void app_main(void) {
         ESP_LOGI(TAG, "LCD display task started successfully");
     }
 
+    // Initialize LED control
+    ESP_LOGI(TAG, "Initializing LED control...");
+    led_control_config_t led_config = {
+        .low_threshold = 0.15f,      // 15% intensity for green LEDs (quiet audio)
+        .medium_threshold = 0.35f,   // 35% intensity for yellow LEDs (normal audio)
+        .high_threshold = 0.65f,     // 65% intensity for red LEDs (loud audio)
+        .smoothing_factor = 0.2f,     // 20% smoothing (faster response)
+        .enable_leds = true
+    };
+    
+    ret = led_control_init(&led_config);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to initialize LED control: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "Continuing without LED control...");
+    } else {
+        ESP_LOGI(TAG, "LED control initialized successfully");
+        
+        // Test all LEDs to verify hardware connection
+        ESP_LOGI(TAG, "Running LED hardware test...");
+        ret = led_control_test_all(500);  // 500ms delay between tests
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "LED test failed: %s", esp_err_to_name(ret));
+        }
+    }
+
     // Configure audio processing
     audio_config_t audio_config = {
-        .volume_scale = 0.5f,
+        .volume_scale = 1.5f,
         .enable_debug = true,
         .enable_channel_swap = true,
         .enable_delay = true,          // Enable delay effect
-        .delay_time_ms = 250.0f,       // 250ms delay time
+        .delay_time_ms = 50.0f,       // 250ms delay time
         .delay_mix = 0.9f,             // 90% wet signal
         .delay_feedback = 0.4f         // 40% feedback for multiple echoes
     };

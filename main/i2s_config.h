@@ -5,13 +5,13 @@
 #include "driver/i2s.h"
 
 // I2S pin definitions
-#define DAC_BCK_PIN 36
-#define DAC_LRCK_PIN 37
-#define DAC_DATA_PIN 38
+#define DAC_BCK_PIN 38
+#define DAC_LRCK_PIN 36
+#define DAC_DATA_PIN 37
 
 // I2S ADC pin definitions (slave mode)
-#define ADC_BCK_PIN 36
-#define ADC_LRCK_PIN 37
+#define ADC_BCK_PIN 38
+#define ADC_LRCK_PIN 36
 #define ADC_DATA_PIN 35
 
 // Audio configuration

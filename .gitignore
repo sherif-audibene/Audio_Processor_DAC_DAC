@@ -32,6 +32,7 @@ Makefile
 *~
 .DS_Store
 Thumbs.db
+.cache/
 
 # Python cache (if using Python scripts)
 __pycache__/

@@ -23,7 +23,7 @@ static size_t audio_source_size = 0;
 static SemaphoreHandle_t audio_buffer_mutex = NULL;
 
 // Waveform buffer for display
-#define MAX_WAVEFORM_SAMPLES 256
+#define MAX_WAVEFORM_SAMPLES 4000
 static int16_t waveform_buffer[MAX_WAVEFORM_SAMPLES];
 static size_t waveform_buffer_index = 0;
 static bool waveform_buffer_filled = false;  // Track if we have valid samples
@@ -97,11 +97,6 @@ static void draw_waveform(void) {
         samples_to_display = waveform_buffer_index;
     }
     
-    // Debug: Log drawing info periodically
-    if (draw_count++ % 100 == 0) {
-        ESP_LOGI(TAG, "Drawing: samples=%d, buf_idx=%d, first_val=%d", 
-                 samples_to_display, waveform_buffer_index, waveform_buffer[0]);
-    }
     
     // Calculate decimation factor
     float x_step = (float)LCD_WIDTH / samples_to_display;
@@ -224,11 +219,6 @@ static void lcd_display_task(void *pvParameters) {
     uint32_t loop_count = 0;
     
     while (1) {
-        // Debug: Log status every 100 loops
-        if (loop_count++ % 100 == 0) {
-            ESP_LOGI(TAG, "LCD Task Status: source_buf=%p, size=%d, waveform_idx=%d, filled=%d",
-                     audio_source_buffer, audio_source_size, waveform_buffer_index, waveform_buffer_filled);
-        }
         
         // Process audio data directly from source buffer
         process_audio_data_from_source();

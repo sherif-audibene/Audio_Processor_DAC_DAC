@@ -12,7 +12,7 @@
 
 // I2C Configuration
 #define LCD_I2C_ADDRESS 0x3F  // Common ST7567S I2C address (may need adjustment)
-#define LCD_I2C_FREQ_HZ 100000  // 100kHz (reduced for reliability)
+#define LCD_I2C_FREQ_HZ 400000  // 100kHz (reduced for reliability)
 
 // ST7567S Commands
 #define ST7567_CMD_DISPLAY_OFF          0xAE
