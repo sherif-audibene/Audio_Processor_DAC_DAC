@@ -108,7 +108,7 @@ esp_err_t audio_effects_init(const audio_effects_config_t *config) {
     }
 
     // Allocate delay buffer (500ms max delay at 48kHz stereo = ~96KB)
-    const size_t max_delay_samples = 48000 / 2 * 2; // 500ms at 48kHz, stereo
+    const size_t max_delay_samples = 48000 / 2 ; // 500ms at 48kHz, stereo
     delay_buffer_size = max_delay_samples;
     delay_buffer = (int32_t *)calloc(delay_buffer_size, sizeof(int32_t));
     if (delay_buffer == NULL) {

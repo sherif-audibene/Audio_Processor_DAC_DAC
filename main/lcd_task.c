@@ -166,13 +166,6 @@ static void process_audio_data_from_source(void) {
         decimation = sample_count / (MAX_WAVEFORM_SAMPLES * 2);
     }
     
-    // Debug: Log some samples periodically
-    bool do_debug = (debug_sample_count++ % 500 == 0);
-    if (do_debug) {
-        ESP_LOGI(TAG, "Processing BEFORE: samples=%d, decimation=%d, buf_idx=%d, first_sample=0x%08X (%d)", 
-                 sample_count, decimation, waveform_buffer_index, 
-                 (unsigned int)audio_source_buffer[0], (int)audio_source_buffer[0]);
-    }
     
     size_t samples_added = 0;
     for (size_t i = 0; i < sample_count && i < audio_source_size / sizeof(int32_t); i += (decimation * 2)) {
@@ -181,12 +174,6 @@ static void process_audio_data_from_source(void) {
         waveform_buffer[waveform_buffer_index] = converted;
         waveform_buffer_index = (waveform_buffer_index + 1) % MAX_WAVEFORM_SAMPLES;
         samples_added++;
-        
-        // Debug first few samples
-        if (do_debug && samples_added <= 3) {
-            ESP_LOGI(TAG, "  Sample[%d]: raw=0x%08X, converted=%d", i, 
-                     (unsigned int)audio_source_buffer[i], converted);
-        }
     }
     
     // Mark buffer as filled once we've wrapped around at least once, or have enough samples
@@ -197,11 +184,6 @@ static void process_audio_data_from_source(void) {
         } else if (waveform_buffer_index >= 128) {
             waveform_buffer_filled = true;  // Half full is good enough
         }
-    }
-    
-    if (do_debug) {
-        ESP_LOGI(TAG, "Processing AFTER: added=%d samples, new_buf_idx=%d, filled=%d", 
-                 samples_added, waveform_buffer_index, waveform_buffer_filled);
     }
     
     xSemaphoreGive(audio_buffer_mutex);
