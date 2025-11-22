@@ -66,7 +66,7 @@ void app_main(void) {
         ESP_LOGI(TAG, "Drawing startup letter 'S'...");
         lcd_display_draw_letter_s(40, 8, 48);  // Center the S on screen (128x64)
         lcd_display_update();
-        vTaskDelay(pdMS_TO_TICKS(2000));  // Show for 2 seconds
+        vTaskDelay(pdMS_TO_TICKS(500));  // Show for 2 seconds
         
         // Clean up before starting LCD task
         lcd_display_cleanup();

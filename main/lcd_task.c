@@ -71,15 +71,6 @@ static void draw_center_line(void) {
  */
 static uint32_t draw_count = 0;
 static void draw_waveform(void) {
-    if (!waveform_buffer_filled) {
-        static uint32_t warn_count = 0;
-        // More frequent warnings at startup, then reduce
-        uint32_t warn_interval = (warn_count < 10) ? 1 : 100;
-        if (warn_count++ % warn_interval == 0) {
-            ESP_LOGW(TAG, "Buffer not yet filled: waveform_buffer_index=%d (waiting for audio data)", waveform_buffer_index);
-        }
-        return;  // Not enough samples to draw yet
-    }
     
     xSemaphoreTake(config_mutex, portMAX_DELAY);
     waveform_config_t config = current_waveform_config;
@@ -143,15 +134,7 @@ static void draw_waveform(void) {
  * @brief Process audio data directly from audio buffer and update waveform buffer
  */
 static uint32_t debug_sample_count = 0;
-static void process_audio_data_from_source(void) {
-    if (audio_source_buffer == NULL || audio_source_size == 0) {
-        static uint32_t warn_count = 0;
-        if (warn_count++ % 100 == 0) {
-            ESP_LOGW(TAG, "No audio source buffer! Buffer=%p, Size=%d", audio_source_buffer, audio_source_size);
-        }
-        return;
-    }
-    
+static void process_audio_data_from_source(void) {    
     // Take mutex to safely read from audio buffer
     if (xSemaphoreTake(audio_buffer_mutex, pdMS_TO_TICKS(5)) != pdTRUE) {
         return;  // Skip this update if buffer is busy
