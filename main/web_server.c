@@ -1,5 +1,6 @@
 #include "web_server.h"
 #include "device_params.h"
+#include "lcd_task.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "cJSON.h"
@@ -74,12 +75,19 @@ static const char* html_page =
 "<div class='section'>"
 "<h2>LCD Display Settings</h2>"
 "<div class='form-group'>"
+"<label>Display Mode:</label>"
+"<select id='displayMode' name='display_mode' style='width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;'>"
+"<option value='oscilloscope'>Oscilloscope (Waveform)</option>"
+"<option value='spectrum'>Spectral Analyzer (FFT)</option>"
+"</select>"
+"</div>"
+"<div class='form-group'>"
 "<label>Contrast: <span class='range-value' id='contrastValue'>20</span></label>"
 "<input type='range' id='lcdContrast' name='lcd_contrast' min='0' max='63' step='1' value='20' oninput='document.getElementById(\"contrastValue\").textContent=this.value'>"
 "</div>"
 "<div class='form-group'>"
 "<label>Samples Per Screen: <span class='range-value' id='samplesValue'>256</span></label>"
-"<input type='range' id='samplesPerScreen' name='samples_per_screen' min='32' max='256' step='1' value='256' oninput='document.getElementById(\"samplesValue\").textContent=this.value'>"
+"<input type='range' id='samplesPerScreen' name='samples_per_screen' min='32' max='4096' step='1' value='256' oninput='document.getElementById(\"samplesValue\").textContent=this.value'>"
 "</div>"
 "<div class='form-group'>"
 "<label>Amplitude Scale (%): <span class='range-value' id='amplitudeValue'>100</span></label>"
@@ -126,6 +134,35 @@ static const char* html_page =
 "    statusDiv.textContent = message;"
 "    setTimeout(() => statusDiv.textContent = '', 5000);"
 "}"
+"async function loadDisplayMode() {"
+"    try {"
+"        const response = await fetch('/api/display/mode');"
+"        const data = await response.json();"
+"        if (data.success) {"
+"            document.getElementById('displayMode').value = data.mode;"
+"        }"
+"    } catch (error) {"
+"        console.error('Error loading display mode:', error);"
+"    }"
+"}"
+"async function saveDisplayMode() {"
+"    const mode = document.getElementById('displayMode').value;"
+"    try {"
+"        const response = await fetch('/api/display/mode', {"
+"            method: 'POST',"
+"            headers: { 'Content-Type': 'application/json' },"
+"            body: JSON.stringify({ mode: mode })"
+"        });"
+"        const data = await response.json();"
+"        if (data.success) {"
+"            showStatus('Display mode changed to ' + mode);"
+"        } else {"
+"            showStatus('Failed to change display mode: ' + (data.error || 'Unknown error'), true);"
+"        }"
+"    } catch (error) {"
+"        showStatus('Error changing display mode: ' + error, true);"
+"    }"
+"}"
 "async function loadConfig() {"
 "    try {"
 "        const response = await fetch('/api/config');"
@@ -151,6 +188,9 @@ static const char* html_page =
 "            document.getElementById('amplitudeValue').textContent = cfg.lcd.waveform.amplitude_scale;"
 "            document.getElementById('showGrid').checked = cfg.lcd.waveform.show_grid;"
 "            document.getElementById('showCenterLine').checked = cfg.lcd.waveform.show_center_line;"
+"            if (cfg.lcd.waveform.mode) {"
+"                document.getElementById('displayMode').value = cfg.lcd.waveform.mode;"
+"            }"
 "            document.getElementById('lowThreshold').value = cfg.led.low_threshold;"
 "            document.getElementById('lowThresholdValue').textContent = cfg.led.low_threshold;"
 "            document.getElementById('mediumThreshold').value = cfg.led.medium_threshold;"
@@ -167,6 +207,7 @@ static const char* html_page =
 "    } catch (error) {"
 "        showStatus('Error loading configuration: ' + error, true);"
 "    }"
+"    loadDisplayMode();"
 "}"
 "async function saveConfig() {"
 "    const form = document.getElementById('configForm');"
@@ -187,7 +228,8 @@ static const char* html_page =
 "                samples_per_screen: parseInt(formData.get('samples_per_screen')),"
 "                amplitude_scale: parseInt(formData.get('amplitude_scale')),"
 "                show_grid: formData.has('show_grid'),"
-"                show_center_line: formData.has('show_center_line')"
+"                show_center_line: formData.has('show_center_line'),"
+"                mode: formData.get('display_mode') || 'oscilloscope'"
 "            }"
 "        },"
 "        led: {"
@@ -230,6 +272,7 @@ static const char* html_page =
 "        }"
 "    }"
 "}"
+"document.getElementById('displayMode').addEventListener('change', saveDisplayMode);"
 "window.onload = function() { loadConfig(); };"
 "</script>"
 "</body>"
@@ -265,6 +308,8 @@ static esp_err_t api_get_config_handler(httpd_req_t *req) {
         cJSON_AddNumberToObject(lcd_waveform_json, "amplitude_scale", params.lcd.waveform.amplitude_scale);
         cJSON_AddBoolToObject(lcd_waveform_json, "show_grid", params.lcd.waveform.show_grid);
         cJSON_AddBoolToObject(lcd_waveform_json, "show_center_line", params.lcd.waveform.show_center_line);
+        const char *mode_str = (params.lcd.waveform.mode == WAVEFORM_MODE_SPECTRUM) ? "spectrum" : "oscilloscope";
+        cJSON_AddStringToObject(lcd_waveform_json, "mode", mode_str);
         cJSON_AddItemToObject(lcd_json, "waveform", lcd_waveform_json);
         
         // LED config
@@ -348,6 +393,15 @@ static esp_err_t api_post_config_handler(httpd_req_t *req) {
             if (item) params.lcd.waveform.show_grid = cJSON_IsTrue(item);
             item = cJSON_GetObjectItem(waveform_json, "show_center_line");
             if (item) params.lcd.waveform.show_center_line = cJSON_IsTrue(item);
+            item = cJSON_GetObjectItem(waveform_json, "mode");
+            if (item && cJSON_IsString(item)) {
+                const char *mode_str = item->valuestring;
+                if (strcmp(mode_str, "spectrum") == 0 || strcmp(mode_str, "spectral") == 0) {
+                    params.lcd.waveform.mode = WAVEFORM_MODE_SPECTRUM;
+                } else {
+                    params.lcd.waveform.mode = WAVEFORM_MODE_OSCILLOSCOPE;
+                }
+            }
         }
     }
     
@@ -411,6 +465,117 @@ static esp_err_t api_reset_config_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// Handler for POST /api/display/mode
+static esp_err_t api_display_mode_handler(httpd_req_t *req) {
+    char content[256];
+    int ret = httpd_req_recv(req, content, sizeof(content) - 1);
+    
+    if (ret <= 0) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    
+    content[ret] = '\0';
+    
+    cJSON *json = cJSON_Parse(content);
+    if (!json) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "Invalid JSON", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+    
+    cJSON *mode_item = cJSON_GetObjectItem(json, "mode");
+    if (!mode_item || !cJSON_IsString(mode_item)) {
+        cJSON_Delete(json);
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "Missing or invalid 'mode' field", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+    
+    const char *mode_str = mode_item->valuestring;
+    waveform_mode_t mode;
+    
+    if (strcmp(mode_str, "oscilloscope") == 0 || strcmp(mode_str, "waveform") == 0) {
+        mode = WAVEFORM_MODE_OSCILLOSCOPE;
+    } else if (strcmp(mode_str, "spectrum") == 0 || strcmp(mode_str, "spectral") == 0) {
+        mode = WAVEFORM_MODE_SPECTRUM;
+    } else {
+        cJSON_Delete(json);
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "Invalid mode. Use 'oscilloscope' or 'spectrum'", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+    
+    cJSON_Delete(json);
+    
+    // Update waveform config with new mode
+    waveform_config_t waveform_config;
+    esp_err_t err = lcd_task_get_waveform_config(&waveform_config);
+    if (err == ESP_OK) {
+        waveform_config.mode = mode;
+        err = lcd_task_set_waveform_config(&waveform_config);
+        
+        // Also update device params to persist the setting
+        device_params_t params;
+        if (device_params_get(&params) == ESP_OK) {
+            params.lcd.waveform.mode = mode;
+            device_params_update(&params);
+        }
+    }
+    
+    cJSON *response = cJSON_CreateObject();
+    if (err == ESP_OK) {
+        cJSON_AddBoolToObject(response, "success", true);
+        cJSON_AddStringToObject(response, "mode", mode_str);
+    } else {
+        cJSON_AddBoolToObject(response, "success", false);
+        cJSON_AddStringToObject(response, "error", esp_err_to_name(err));
+    }
+    
+    char *response_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, response_str, strlen(response_str));
+    free(response_str);
+    cJSON_Delete(response);
+    
+    return ESP_OK;
+}
+
+// Handler for GET /api/display/mode
+static esp_err_t api_get_display_mode_handler(httpd_req_t *req) {
+    waveform_config_t waveform_config;
+    esp_err_t err = lcd_task_get_waveform_config(&waveform_config);
+    
+    cJSON *response = cJSON_CreateObject();
+    if (err == ESP_OK) {
+        cJSON_AddBoolToObject(response, "success", true);
+        const char *mode_str;
+        switch (waveform_config.mode) {
+            case WAVEFORM_MODE_OSCILLOSCOPE:
+                mode_str = "oscilloscope";
+                break;
+            case WAVEFORM_MODE_SPECTRUM:
+                mode_str = "spectrum";
+                break;
+            default:
+                mode_str = "oscilloscope";
+                break;
+        }
+        cJSON_AddStringToObject(response, "mode", mode_str);
+    } else {
+        cJSON_AddBoolToObject(response, "success", false);
+        cJSON_AddStringToObject(response, "error", esp_err_to_name(err));
+    }
+    
+    char *response_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, response_str, strlen(response_str));
+    free(response_str);
+    cJSON_Delete(response);
+    
+    return ESP_OK;
+}
+
 // Handler for GET /
 static esp_err_t root_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
@@ -425,7 +590,7 @@ esp_err_t web_server_init(void) {
     }
     
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 10;
+    config.max_uri_handlers = 12;
     config.max_open_sockets = 7;
     
     ESP_LOGI(TAG, "Starting web server on port %d", config.server_port);
@@ -463,6 +628,22 @@ esp_err_t web_server_init(void) {
             .user_ctx = NULL
         };
         httpd_register_uri_handler(server_handle, &api_reset_config_uri);
+        
+        httpd_uri_t api_get_display_mode_uri = {
+            .uri = "/api/display/mode",
+            .method = HTTP_GET,
+            .handler = api_get_display_mode_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server_handle, &api_get_display_mode_uri);
+        
+        httpd_uri_t api_post_display_mode_uri = {
+            .uri = "/api/display/mode",
+            .method = HTTP_POST,
+            .handler = api_display_mode_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server_handle, &api_post_display_mode_uri);
         
         ESP_LOGI(TAG, "Web server started successfully");
         return ESP_OK;

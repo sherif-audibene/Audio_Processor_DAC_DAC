@@ -14,6 +14,33 @@
 
 static const char *TAG = "MAIN";
 
+/**
+ * @brief WiFi connection callback - called when WiFi connects or disconnects
+ */
+static void wifi_connection_callback(bool connected, const char *ip_str) {
+    if (connected && ip_str != NULL) {
+        ESP_LOGI(TAG, "WiFi connected! IP address: %s", ip_str);
+        
+        // Show confirmation message on LCD
+        if (lcd_task_is_running()) {
+            char message[32];
+            snprintf(message, sizeof(message), "WiFi: %s", ip_str);
+            lcd_task_show_message(message);
+        }
+        
+        // Start web server
+        ESP_LOGI(TAG, "Starting web server...");
+        esp_err_t ret = web_server_start();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start web server: %s", esp_err_to_name(ret));
+        } else {
+            ESP_LOGI(TAG, "Web server started! Access control panel at http://%s", ip_str);
+        }
+    } else {
+        ESP_LOGW(TAG, "WiFi disconnected");
+    }
+}
+
 
 
 
@@ -31,11 +58,11 @@ void app_main(void) {
         return;
     }
 
-    // Initialize WiFi
-    ESP_LOGI(TAG, "Initializing WiFi...");
+    // Initialize WiFi (non-blocking - will connect in background)
+    ESP_LOGI(TAG, "Initializing WiFi (non-blocking)...");
     wifi_manager_config_t wifi_config = {
-        .ssid = "Sherif-Home-2.4",
-        .password = "2026857571611513456",
+        .ssid = CONFIG_WIFI_SSID,
+        .password = CONFIG_WIFI_PASSWORD,
         .timeout_ms = 10000
     };
     
@@ -44,34 +71,15 @@ void app_main(void) {
         ESP_LOGE(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(ret));
         ESP_LOGW(TAG, "Continuing without WiFi...");
     } else {
+        // Register callback for WiFi connection events
+        wifi_manager_set_connection_callback(wifi_connection_callback);
+        
+        // Start WiFi connection in background (non-blocking)
         ret = wifi_manager_start();
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(ret));
         } else {
-            // Wait for WiFi connection
-            int retries = 20;
-            while (!wifi_manager_is_connected() && retries > 0) {
-                vTaskDelay(pdMS_TO_TICKS(500));
-                retries--;
-            }
-            
-            if (wifi_manager_is_connected()) {
-                char ip_str[16];
-                if (wifi_manager_get_ip(ip_str, sizeof(ip_str)) == ESP_OK) {
-                    ESP_LOGI(TAG, "WiFi connected! IP address: %s", ip_str);
-                }
-                
-                // Start web server
-                ESP_LOGI(TAG, "Starting web server...");
-                ret = web_server_start();
-                if (ret != ESP_OK) {
-                    ESP_LOGE(TAG, "Failed to start web server: %s", esp_err_to_name(ret));
-                } else {
-                    ESP_LOGI(TAG, "Web server started! Access control panel at http://%s", ip_str);
-                }
-            } else {
-                ESP_LOGW(TAG, "WiFi connection timeout, continuing without network...");
-            }
+            ESP_LOGI(TAG, "WiFi connection started in background, continuing with audio initialization...");
         }
     }
 

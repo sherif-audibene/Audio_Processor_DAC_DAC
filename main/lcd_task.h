@@ -95,5 +95,14 @@ esp_err_t lcd_task_get_audio_source(int32_t **buffer, size_t *size);
  */
 esp_err_t lcd_task_set_contrast(uint8_t contrast);
 
+/**
+ * @brief Display a temporary message on the LCD
+ * Message will be displayed for a few seconds as an overlay
+ * 
+ * @param message Message text to display (max 20 characters)
+ * @return ESP_OK on success, error code on failure
+ */
+esp_err_t lcd_task_show_message(const char *message);
+
 #endif // LCD_TASK_H
 

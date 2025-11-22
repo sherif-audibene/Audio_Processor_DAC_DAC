@@ -51,5 +51,18 @@ esp_err_t wifi_manager_get_ip(char *ip_str, size_t len);
  */
 void wifi_manager_cleanup(void);
 
+/**
+ * @brief WiFi connection event callback function type
+ * @param connected true if connected, false if disconnected
+ * @param ip_str IP address string (NULL if not connected)
+ */
+typedef void (*wifi_connection_callback_t)(bool connected, const char *ip_str);
+
+/**
+ * @brief Register callback for WiFi connection events
+ * @param callback Callback function (can be NULL to unregister)
+ */
+void wifi_manager_set_connection_callback(wifi_connection_callback_t callback);
+
 #endif // WIFI_MANAGER_H
 

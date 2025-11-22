@@ -1,0 +1,12 @@
+#
+# Example sdkconfig.defaults file
+# Copy this file to sdkconfig.defaults and set your WiFi credentials
+# Or use: idf.py menuconfig -> WiFi Configuration
+#
+# Note: sdkconfig.defaults is automatically merged into sdkconfig during build
+# The actual sdkconfig file (with your real credentials) should be in .gitignore
+
+# WiFi Configuration
+CONFIG_WIFI_SSID="Your-WiFi-SSID"
+CONFIG_WIFI_PASSWORD="Your-WiFi-Password"
+

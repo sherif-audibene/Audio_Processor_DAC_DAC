@@ -1,0 +1,19 @@
+menu "WiFi Configuration"
+
+    config WIFI_SSID
+        string "WiFi SSID"
+        default "Your-WiFi-SSID"
+        help
+            WiFi network SSID (Service Set Identifier) to connect to.
+            Set this via menuconfig or sdkconfig file.
+
+    config WIFI_PASSWORD
+        string "WiFi Password"
+        default "Your-WiFi-Password"
+        help
+            WiFi network password.
+            WARNING: This value will be stored in sdkconfig file.
+            Make sure sdkconfig is in .gitignore to avoid committing credentials.
+
+endmenu
+

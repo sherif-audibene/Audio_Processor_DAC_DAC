@@ -1,5 +1,6 @@
 #include "lcd_task.h"
 #include "lcd_display.h"
+#include "fft_analyzer.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -27,6 +28,17 @@ static SemaphoreHandle_t audio_buffer_mutex = NULL;
 static int16_t waveform_buffer[MAX_WAVEFORM_SAMPLES];
 static size_t waveform_buffer_index = 0;
 static bool waveform_buffer_filled = false;  // Track if we have valid samples
+
+// FFT spectrum buffer
+static float spectrum_magnitude[FFT_OUTPUT_SIZE];
+static bool spectrum_valid = false;
+
+// Message display
+#define MAX_MESSAGE_LEN 32
+static char message_buffer[MAX_MESSAGE_LEN] = {0};
+static TickType_t message_end_time = 0;
+static SemaphoreHandle_t message_mutex = NULL;
+#define MESSAGE_DISPLAY_TIME_MS 3000  // Show message for 3 seconds
 
 /**
  * @brief Convert 24-bit I2S sample to 16-bit for display
@@ -63,6 +75,178 @@ static void draw_center_line(void) {
     uint8_t center_y = LCD_HEIGHT / 2;
     for (uint8_t x = 0; x < LCD_WIDTH; x += 2) {
         lcd_display_set_pixel(x, center_y, 1);
+    }
+}
+
+/**
+ * @brief Simple 5x7 font data for basic characters
+ * Each character is 5 pixels wide, 7 pixels tall
+ */
+static const uint8_t font_5x7[][5] = {
+    {0x00, 0x00, 0x00, 0x00, 0x00}, // space (0x20)
+    {0x00, 0x00, 0x5F, 0x00, 0x00}, // !
+    {0x00, 0x07, 0x00, 0x07, 0x00}, // "
+    {0x14, 0x7F, 0x14, 0x7F, 0x14}, // #
+    {0x24, 0x2A, 0x7F, 0x2A, 0x12}, // $
+    {0x23, 0x13, 0x08, 0x64, 0x62}, // %
+    {0x36, 0x49, 0x55, 0x22, 0x50}, // &
+    {0x00, 0x00, 0x07, 0x00, 0x00}, // '
+    {0x00, 0x1C, 0x22, 0x41, 0x00}, // (
+    {0x00, 0x41, 0x22, 0x1C, 0x00}, // )
+    {0x08, 0x2A, 0x1C, 0x2A, 0x08}, // *
+    {0x08, 0x08, 0x3E, 0x08, 0x08}, // +
+    {0x00, 0x50, 0x30, 0x00, 0x00}, // ,
+    {0x08, 0x08, 0x08, 0x08, 0x08}, // -
+    {0x00, 0x60, 0x60, 0x00, 0x00}, // .
+    {0x20, 0x10, 0x08, 0x04, 0x02}, // /
+    {0x3E, 0x51, 0x49, 0x45, 0x3E}, // 0
+    {0x00, 0x42, 0x7F, 0x40, 0x00}, // 1
+    {0x42, 0x61, 0x51, 0x49, 0x46}, // 2
+    {0x21, 0x41, 0x45, 0x4B, 0x31}, // 3
+    {0x18, 0x14, 0x12, 0x7F, 0x10}, // 4
+    {0x27, 0x45, 0x45, 0x45, 0x39}, // 5
+    {0x3C, 0x4A, 0x49, 0x49, 0x30}, // 6
+    {0x01, 0x71, 0x09, 0x05, 0x03}, // 7
+    {0x36, 0x49, 0x49, 0x49, 0x36}, // 8
+    {0x06, 0x49, 0x49, 0x29, 0x1E}, // 9
+    {0x00, 0x36, 0x36, 0x00, 0x00}, // :
+    {0x00, 0x56, 0x36, 0x00, 0x00}, // ;
+    {0x08, 0x14, 0x22, 0x41, 0x00}, // <
+    {0x14, 0x14, 0x14, 0x14, 0x14}, // =
+    {0x00, 0x41, 0x22, 0x14, 0x08}, // >
+    {0x02, 0x01, 0x51, 0x09, 0x06}, // ?
+    {0x32, 0x49, 0x59, 0x51, 0x3E}, // @
+    {0x7C, 0x12, 0x11, 0x12, 0x7C}, // A
+    {0x7F, 0x49, 0x49, 0x49, 0x36}, // B
+    {0x3E, 0x41, 0x41, 0x41, 0x22}, // C
+    {0x7F, 0x41, 0x41, 0x22, 0x1C}, // D
+    {0x7F, 0x49, 0x49, 0x49, 0x41}, // E
+    {0x7F, 0x09, 0x09, 0x09, 0x01}, // F
+    {0x3E, 0x41, 0x49, 0x49, 0x7A}, // G
+    {0x7F, 0x08, 0x08, 0x08, 0x7F}, // H
+    {0x00, 0x41, 0x7F, 0x41, 0x00}, // I
+    {0x20, 0x40, 0x41, 0x3F, 0x01}, // J
+    {0x7F, 0x08, 0x14, 0x22, 0x41}, // K
+    {0x7F, 0x40, 0x40, 0x40, 0x40}, // L
+    {0x7F, 0x02, 0x0C, 0x02, 0x7F}, // M
+    {0x7F, 0x04, 0x08, 0x10, 0x7F}, // N
+    {0x3E, 0x41, 0x41, 0x41, 0x3E}, // O
+    {0x7F, 0x09, 0x09, 0x09, 0x06}, // P
+    {0x3E, 0x41, 0x51, 0x21, 0x5E}, // Q
+    {0x7F, 0x09, 0x19, 0x29, 0x46}, // R
+    {0x46, 0x49, 0x49, 0x49, 0x31}, // S
+    {0x01, 0x01, 0x7F, 0x01, 0x01}, // T
+    {0x3F, 0x40, 0x40, 0x40, 0x3F}, // U
+    {0x1F, 0x20, 0x40, 0x20, 0x1F}, // V
+    {0x3F, 0x40, 0x38, 0x40, 0x3F}, // W
+    {0x63, 0x14, 0x08, 0x14, 0x63}, // X
+    {0x07, 0x08, 0x70, 0x08, 0x07}, // Y
+    {0x61, 0x51, 0x49, 0x45, 0x43}, // Z
+};
+
+/**
+ * @brief Draw a single character using 5x7 font
+ */
+static void draw_char(uint8_t x, uint8_t y, char c, uint8_t color) {
+    if (c < 0x20 || c > 0x5A) {
+        c = 0x20; // Use space for unsupported characters
+    }
+    
+    const uint8_t *char_data = font_5x7[c - 0x20];
+    
+    for (uint8_t col = 0; col < 5; col++) {
+        uint8_t col_data = char_data[col];
+        for (uint8_t row = 0; row < 7; row++) {
+            if (col_data & (1 << row)) {
+                lcd_display_set_pixel(x + col, y + row, color);
+            }
+        }
+    }
+}
+
+/**
+ * @brief Draw a text string
+ */
+static void draw_text(uint8_t x, uint8_t y, const char *text, uint8_t color) {
+    uint8_t pos_x = x;
+    while (*text && pos_x < LCD_WIDTH - 5) {
+        draw_char(pos_x, y, *text, color);
+        pos_x += 6; // 5 pixels for char + 1 pixel spacing
+        text++;
+    }
+}
+
+/**
+ * @brief Draw message overlay on display
+ */
+static void draw_message_overlay(void) {
+    if (message_mutex == NULL) {
+        return;
+    }
+    
+    TickType_t current_time = xTaskGetTickCount();
+    
+    xSemaphoreTake(message_mutex, portMAX_DELAY);
+    bool show_message = (current_time < message_end_time) && (message_buffer[0] != '\0');
+    char msg_copy[MAX_MESSAGE_LEN];
+    if (show_message) {
+        strncpy(msg_copy, message_buffer, sizeof(msg_copy) - 1);
+        msg_copy[sizeof(msg_copy) - 1] = '\0';
+    }
+    xSemaphoreGive(message_mutex);
+    
+    if (show_message) {
+        // Draw message box background
+        lcd_display_fill_rect(10, 20, 108, 24, 0); // Black background
+        lcd_display_draw_rect(10, 20, 108, 24, 1); // White border
+        
+        // Draw text (white on black)
+        draw_text(15, 26, msg_copy, 1);
+    }
+}
+
+/**
+ * @brief Draw spectral analyzer on display
+ */
+static void draw_spectral_analyzer(void) {
+    if (!spectrum_valid) {
+        return;  // No valid spectrum data yet
+    }
+    
+    // Draw frequency bars (spectrum)
+    uint8_t bar_width = LCD_WIDTH / FFT_OUTPUT_SIZE;
+    if (bar_width < 1) bar_width = 1;
+    
+    for (uint8_t i = 0; i < FFT_OUTPUT_SIZE && i * bar_width < LCD_WIDTH; i++) {
+        // Calculate bar height from magnitude (0.0 to 1.0)
+        float magnitude = spectrum_magnitude[i];
+        uint8_t bar_height = (uint8_t)(magnitude * (LCD_HEIGHT - 4));  // Leave 4 pixels at bottom
+        
+        // Clamp bar height
+        if (bar_height > LCD_HEIGHT - 4) {
+            bar_height = LCD_HEIGHT - 4;
+        }
+        
+        // Draw bar from bottom up
+        uint8_t x_start = i * bar_width;
+        uint8_t x_end = x_start + bar_width - 1;
+        if (x_end >= LCD_WIDTH) x_end = LCD_WIDTH - 1;
+        
+        uint8_t y_bottom = LCD_HEIGHT - 1;
+        uint8_t y_top = y_bottom - bar_height;
+        
+        // Fill bar
+        for (uint8_t x = x_start; x <= x_end; x++) {
+            for (uint8_t y = y_top; y <= y_bottom; y++) {
+                lcd_display_set_pixel(x, y, 1);
+            }
+        }
+    }
+    
+    // Draw frequency labels at key points (optional, can be removed if too cluttered)
+    // For now, we'll just draw a baseline
+    for (uint8_t x = 0; x < LCD_WIDTH; x += 2) {
+        lcd_display_set_pixel(x, LCD_HEIGHT - 1, 1);
     }
 }
 
@@ -142,6 +326,37 @@ static void process_audio_data_from_source(void) {
     
     size_t sample_count = audio_source_size / sizeof(int32_t);
     
+    // Get current display mode
+    xSemaphoreTake(config_mutex, portMAX_DELAY);
+    waveform_mode_t display_mode = current_waveform_config.mode;
+    xSemaphoreGive(config_mutex);
+    
+    // Prepare samples for FFT if in spectrum mode
+    if (display_mode == WAVEFORM_MODE_SPECTRUM) {
+        // Collect FFT_SIZE samples (left channel only)
+        static int16_t fft_samples[FFT_SIZE];
+        static size_t fft_sample_index = 0;
+        
+        // Collect samples for FFT (left channel only, every other sample)
+        for (size_t i = 0; i < sample_count && fft_sample_index < FFT_SIZE; i += 2) {
+            fft_samples[fft_sample_index] = convert_sample_to_display(audio_source_buffer[i]);
+            fft_sample_index++;
+            
+            // When we have enough samples, compute FFT
+            if (fft_sample_index >= FFT_SIZE) {
+                if (fft_analyzer_compute(fft_samples, FFT_SIZE, spectrum_magnitude) == ESP_OK) {
+                    spectrum_valid = true;
+                }
+                // Keep last half of samples for overlap (better frequency resolution)
+                memmove(fft_samples, fft_samples + FFT_SIZE / 2, (FFT_SIZE / 2) * sizeof(int16_t));
+                fft_sample_index = FFT_SIZE / 2;  // Start from middle for overlap
+            }
+        }
+    } else {
+        // Reset FFT collection when not in spectrum mode
+        spectrum_valid = false;
+    }
+    
     // Decimate samples to fit into waveform buffer
     // Take only left channel (every other sample for stereo)
     size_t decimation = 1;
@@ -206,13 +421,27 @@ static void lcd_display_task(void *pvParameters) {
                 draw_grid();
             }
             
-            // Draw center line if enabled
-            if (show_center) {
-                draw_center_line();
+            // Get display mode
+            xSemaphoreTake(config_mutex, portMAX_DELAY);
+            waveform_mode_t display_mode = current_waveform_config.mode;
+            xSemaphoreGive(config_mutex);
+            
+            // Draw based on mode
+            if (display_mode == WAVEFORM_MODE_SPECTRUM) {
+                // Draw spectral analyzer
+                draw_spectral_analyzer();
+            } else {
+                // Draw center line if enabled (only for waveform mode)
+                if (show_center) {
+                    draw_center_line();
+                }
+                
+                // Draw waveform
+                draw_waveform();
             }
             
-            // Draw waveform
-            draw_waveform();
+            // Draw message overlay if active
+            draw_message_overlay();
             
             // Update display
             esp_err_t ret = lcd_display_update();
@@ -252,6 +481,15 @@ esp_err_t lcd_task_start(const lcd_task_config_t *config) {
         return ESP_ERR_NO_MEM;
     }
     
+    // Create mutex for message display
+    message_mutex = xSemaphoreCreateMutex();
+    if (message_mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create message mutex");
+        vSemaphoreDelete(audio_buffer_mutex);
+        vSemaphoreDelete(config_mutex);
+        return ESP_ERR_NO_MEM;
+    }
+    
     // Store initial waveform configuration
     current_waveform_config = config->waveform;
     
@@ -278,6 +516,17 @@ esp_err_t lcd_task_start(const lcd_task_config_t *config) {
     memset(waveform_buffer, 0, sizeof(waveform_buffer));
     waveform_buffer_index = 0;
     waveform_buffer_filled = false;
+    
+    // Initialize FFT analyzer
+    ret = fft_analyzer_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to initialize FFT analyzer: %s", esp_err_to_name(ret));
+        // Continue anyway - waveform mode will still work
+    }
+    
+    // Initialize spectrum buffer
+    memset(spectrum_magnitude, 0, sizeof(spectrum_magnitude));
+    spectrum_valid = false;
     
     // Create LCD task
     BaseType_t task_ret = xTaskCreate(lcd_display_task, "lcd_display", 
@@ -308,10 +557,18 @@ void lcd_task_stop(void) {
             audio_buffer_mutex = NULL;
         }
         
+        if (message_mutex != NULL) {
+            vSemaphoreDelete(message_mutex);
+            message_mutex = NULL;
+        }
+        
         if (config_mutex != NULL) {
             vSemaphoreDelete(config_mutex);
             config_mutex = NULL;
         }
+        
+        // Cleanup FFT analyzer
+        fft_analyzer_cleanup();
         
         audio_source_buffer = NULL;
         audio_source_size = 0;
@@ -386,5 +643,24 @@ esp_err_t lcd_task_get_audio_source(int32_t **buffer, size_t *size) {
 
 esp_err_t lcd_task_set_contrast(uint8_t contrast) {
     return lcd_display_set_contrast(contrast);
+}
+
+esp_err_t lcd_task_show_message(const char *message) {
+    if (message == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (message_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    xSemaphoreTake(message_mutex, portMAX_DELAY);
+    strncpy(message_buffer, message, MAX_MESSAGE_LEN - 1);
+    message_buffer[MAX_MESSAGE_LEN - 1] = '\0';
+    message_end_time = xTaskGetTickCount() + pdMS_TO_TICKS(MESSAGE_DISPLAY_TIME_MS);
+    xSemaphoreGive(message_mutex);
+    
+    ESP_LOGI(TAG, "Displaying message: %s", message);
+    return ESP_OK;
 }
 

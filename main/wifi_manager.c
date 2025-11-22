@@ -11,6 +11,7 @@ static const char *TAG = "WIFI_MANAGER";
 static bool wifi_initialized = false;
 static bool wifi_connected = false;
 static char current_ip[16] = {0};
+static wifi_connection_callback_t connection_callback = NULL;
 
 // Event handler
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
@@ -28,6 +29,13 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             case WIFI_EVENT_STA_DISCONNECTED:
                 ESP_LOGW(TAG, "WiFi disconnected, attempting to reconnect...");
                 wifi_connected = false;
+                memset(current_ip, 0, sizeof(current_ip));
+                
+                // Notify callback if registered
+                if (connection_callback != NULL) {
+                    connection_callback(false, NULL);
+                }
+                
                 esp_wifi_connect();
                 break;
             default:
@@ -39,6 +47,11 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             snprintf(current_ip, sizeof(current_ip), IPSTR, IP2STR(&event->ip_info.ip));
             ESP_LOGI(TAG, "Got IP address: %s", current_ip);
             wifi_connected = true;
+            
+            // Notify callback if registered
+            if (connection_callback != NULL) {
+                connection_callback(true, current_ip);
+            }
         }
     }
 }
@@ -151,7 +164,12 @@ void wifi_manager_cleanup(void) {
         esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler);
         esp_wifi_deinit();
         wifi_initialized = false;
+        connection_callback = NULL;
         ESP_LOGI(TAG, "WiFi manager cleaned up");
     }
+}
+
+void wifi_manager_set_connection_callback(wifi_connection_callback_t callback) {
+    connection_callback = callback;
 }
 
