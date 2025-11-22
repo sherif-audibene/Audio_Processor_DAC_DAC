@@ -7,6 +7,10 @@
 #include "i2c_scanner.h"
 #include "led_control.h"
 #include "driver/i2c.h"
+#include "wifi_manager.h"
+#include "web_server.h"
+#include "device_params.h"
+#include "freertos/task.h"
 
 static const char *TAG = "MAIN";
 
@@ -17,7 +21,59 @@ static const char *TAG = "MAIN";
  * @brief Main application entry point
  */
 void app_main(void) {
-    ESP_LOGI(TAG, "Starting I2S Audio Passthrough Application with LCD Display");
+    ESP_LOGI(TAG, "Starting I2S Audio Passthrough Application with LCD Display and WiFi");
+
+    // Initialize device parameters system
+    ESP_LOGI(TAG, "Initializing device parameters...");
+    esp_err_t ret = device_params_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize device parameters: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    // Initialize WiFi
+    ESP_LOGI(TAG, "Initializing WiFi...");
+    wifi_manager_config_t wifi_config = {
+        .ssid = "Sherif-Home-2.4",
+        .password = "2026857571611513456",
+        .timeout_ms = 10000
+    };
+    
+    ret = wifi_manager_init(&wifi_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "Continuing without WiFi...");
+    } else {
+        ret = wifi_manager_start();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start WiFi: %s", esp_err_to_name(ret));
+        } else {
+            // Wait for WiFi connection
+            int retries = 20;
+            while (!wifi_manager_is_connected() && retries > 0) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                retries--;
+            }
+            
+            if (wifi_manager_is_connected()) {
+                char ip_str[16];
+                if (wifi_manager_get_ip(ip_str, sizeof(ip_str)) == ESP_OK) {
+                    ESP_LOGI(TAG, "WiFi connected! IP address: %s", ip_str);
+                }
+                
+                // Start web server
+                ESP_LOGI(TAG, "Starting web server...");
+                ret = web_server_start();
+                if (ret != ESP_OK) {
+                    ESP_LOGE(TAG, "Failed to start web server: %s", esp_err_to_name(ret));
+                } else {
+                    ESP_LOGI(TAG, "Web server started! Access control panel at http://%s", ip_str);
+                }
+            } else {
+                ESP_LOGW(TAG, "WiFi connection timeout, continuing without network...");
+            }
+        }
+    }
 
     // First, scan I2C bus to detect LCD
     ESP_LOGI(TAG, "Scanning I2C bus for LCD display...");
@@ -32,7 +88,7 @@ void app_main(void) {
         .master.clk_speed = 400000,
     };
     
-    esp_err_t ret = i2c_param_config(I2C_NUM_0, &i2c_conf);
+    ret = i2c_param_config(I2C_NUM_0, &i2c_conf);
     if (ret == ESP_OK) {    
         ret = i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
         if (ret == ESP_OK) {
@@ -76,24 +132,13 @@ void app_main(void) {
         ESP_LOGW(TAG, "Failed to show startup screen: %s", esp_err_to_name(ret));
     }
 
-    // Configure LCD display and waveform
-    lcd_task_config_t lcd_config = {
-        .sda_pin = 6,                    // SDA on GPIO 6
-        .scl_pin = 7,                    // SCL on GPIO 7
-        .lcd_contrast = 20,              // Contrast level (0-63)
-        .waveform = {
-            .samples_per_screen = 10000,   // Display 256 samples (MAX) for zoomed out view
-            .time_scale = 1,             // Time scale multiplier
-            .amplitude_scale = 100,       // 50% amplitude scale (zoom out vertically)
-            .show_grid = true,           // Show grid lines
-            .show_center_line = true,    // Show center reference line
-            .mode = WAVEFORM_MODE_OSCILLOSCOPE
-        }
-    };
+    // Get device parameters (with defaults)
+    device_params_t params;
+    device_params_get(&params);
 
     // Initialize and start LCD display task
     ESP_LOGI(TAG, "Initializing LCD display task...");
-    ret = lcd_task_start(&lcd_config);
+    ret = lcd_task_start(&params.lcd);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start LCD task: %s", esp_err_to_name(ret));
         ESP_LOGW(TAG, "Continuing without LCD display...");
@@ -103,15 +148,7 @@ void app_main(void) {
 
     // Initialize LED control
     ESP_LOGI(TAG, "Initializing LED control...");
-    led_control_config_t led_config = {
-        .low_threshold = 0.15f,      // 15% intensity for green LEDs (quiet audio)
-        .medium_threshold = 0.35f,   // 35% intensity for yellow LEDs (normal audio)
-        .high_threshold = 0.65f,     // 65% intensity for red LEDs (loud audio)
-        .smoothing_factor = 0.2f,     // 20% smoothing (faster response)
-        .enable_leds = true
-    };
-    
-    ret = led_control_init(&led_config);
+    ret = led_control_init(&params.led);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to initialize LED control: %s", esp_err_to_name(ret));
         ESP_LOGW(TAG, "Continuing without LED control...");
@@ -126,19 +163,8 @@ void app_main(void) {
         }
     }
 
-    // Configure audio processing
-    audio_config_t audio_config = {
-        .volume_scale = 1.5f,
-        .enable_debug = true,
-        .enable_channel_swap = true,
-        .enable_delay = true,          // Enable delay effect
-        .delay_time_ms = 50.0f,       // 250ms delay time
-        .delay_mix = 0.9f,             // 90% wet signal
-        .delay_feedback = 0.4f         // 40% feedback for multiple echoes
-    };
-
     // Initialize audio processor
-    ret = audio_processor_init(&audio_config);
+    ret = audio_processor_init(&params.audio);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize audio processor: %s", esp_err_to_name(ret));
         lcd_task_stop();
@@ -179,8 +205,15 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Application started successfully!");
     ESP_LOGI(TAG, "Waveform Display Settings:");
-    ESP_LOGI(TAG, "  - Resolution: %d samples per screen", lcd_config.waveform.samples_per_screen);
-    ESP_LOGI(TAG, "  - Amplitude Scale: %d%%", lcd_config.waveform.amplitude_scale);
-    ESP_LOGI(TAG, "  - Grid: %s", lcd_config.waveform.show_grid ? "ON" : "OFF");
+    ESP_LOGI(TAG, "  - Resolution: %d samples per screen", params.lcd.waveform.samples_per_screen);
+    ESP_LOGI(TAG, "  - Amplitude Scale: %d%%", params.lcd.waveform.amplitude_scale);
+    ESP_LOGI(TAG, "  - Grid: %s", params.lcd.waveform.show_grid ? "ON" : "OFF");
     ESP_LOGI(TAG, "  - Direct buffer access (zero-copy)");
+    
+    if (wifi_manager_is_connected()) {
+        char ip_str[16];
+        if (wifi_manager_get_ip(ip_str, sizeof(ip_str)) == ESP_OK) {
+            ESP_LOGI(TAG, "Web interface available at: http://%s", ip_str);
+        }
+    }
 }

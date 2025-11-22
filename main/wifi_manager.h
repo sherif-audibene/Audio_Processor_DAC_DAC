@@ -2,22 +2,25 @@
 #define WIFI_MANAGER_H
 
 #include "esp_err.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
 
 /**
- * @brief WiFi configuration structure
+ * @brief WiFi manager configuration structure
  */
 typedef struct {
     const char *ssid;
     const char *password;
     uint32_t timeout_ms;  // Connection timeout in milliseconds
-} wifi_config_t;
+} wifi_manager_config_t;
 
 /**
  * @brief Initialize WiFi manager
  * @param config WiFi configuration (can be NULL for defaults)
  * @return ESP_OK on success, error code on failure
  */
-esp_err_t wifi_manager_init(const wifi_config_t *config);
+esp_err_t wifi_manager_init(const wifi_manager_config_t *config);
 
 /**
  * @brief Start WiFi connection
