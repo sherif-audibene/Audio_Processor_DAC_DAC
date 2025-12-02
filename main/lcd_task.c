@@ -1,6 +1,7 @@
 #include "lcd_task.h"
 #include "lcd_display.h"
 #include "fft_analyzer.h"
+#include "i2s_config.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -8,6 +9,7 @@
 #include "freertos/semphr.h"
 #include <string.h>
 #include <math.h>
+#include <stdio.h>
 
 static const char *TAG = "LCD_TASK";
 
@@ -206,48 +208,176 @@ static void draw_message_overlay(void) {
 }
 
 /**
+ * @brief Calculate frequency for a given FFT bin index
+ * @param bin_index FFT bin index (0 to FFT_OUTPUT_SIZE-1)
+ * @return Frequency in Hz
+ */
+static uint32_t calculate_frequency_for_bin(uint8_t bin_index) {
+    // Frequency per bin = sample_rate / FFT_SIZE
+    // Each bin represents a frequency range
+    float freq_per_bin = (float)SAMPLE_RATE / (float)FFT_SIZE;
+    return (uint32_t)(bin_index * freq_per_bin);
+}
+
+/**
+ * @brief Draw frequency legend below spectral analyzer
+ * Shows frequency range from 100 Hz to 16 kHz
+ */
+static void draw_frequency_legend(void) {
+    // Legend area: bottom 10 pixels (y: 54-63)
+    const uint8_t legend_y = LCD_HEIGHT - 10;
+    
+    // Frequency range to display
+    const uint32_t freq_min = 100;   // 100 Hz
+    const uint32_t freq_max = 16000; // 16 kHz
+    
+    // Draw separator line above legend
+    for (uint8_t x = 0; x < LCD_WIDTH; x++) {
+        lcd_display_set_pixel(x, legend_y - 1, 1);
+    }
+    
+    // Calculate frequency ranges for key points in the 100 Hz - 16 kHz range
+    // Show labels at: 100, 1k, 2k, 4k, 8k, 16k Hz
+    uint32_t label_frequencies[] = {100, 1000, 2000, 4000, 8000, 16000};
+    uint8_t num_labels = sizeof(label_frequencies) / sizeof(label_frequencies[0]);
+    
+    // Calculate x positions for labels based on frequency range
+    float freq_range = (float)(freq_max - freq_min);
+    float freq_per_pixel = freq_range / (float)(LCD_WIDTH - 1);
+    uint8_t last_text_end = 0;  // Track last text position to avoid overlap
+    
+    for (uint8_t i = 0; i < num_labels; i++) {
+        uint32_t freq = label_frequencies[i];
+        if (freq < freq_min || freq > freq_max) continue;  // Skip if outside range
+        
+        // Calculate x position for tick mark
+        // Map frequency to pixel: x = (freq - freq_min) / freq_per_pixel
+        float x_pos_float = (float)(freq - freq_min) / freq_per_pixel;
+        uint8_t x_pos = (uint8_t)(x_pos_float + 0.5f);  // Round to nearest
+        if (x_pos >= LCD_WIDTH) continue;
+        
+        // Draw tick mark
+        for (uint8_t y = legend_y; y < legend_y + 3; y++) {
+            lcd_display_set_pixel(x_pos, y, 1);
+        }
+        
+        // Draw frequency label (format: "100", "1k", "2k", etc.)
+        char label[8];
+        if (freq >= 1000) {
+            snprintf(label, sizeof(label), "%uk", (unsigned int)(freq / 1000));
+        } else {
+            snprintf(label, sizeof(label), "%u", (unsigned int)freq);
+        }
+        
+        // Calculate text width and position
+        uint8_t text_width = strlen(label) * 6;
+        uint8_t text_x;
+        
+        if (i == 0) {
+            // First label: align left with tick
+            text_x = x_pos;
+        } else {
+            // Center text above tick mark, but avoid overlap
+            text_x = (x_pos >= text_width / 2) ? x_pos - text_width / 2 : 0;
+            if (text_x < last_text_end + 2) {
+                // Shift right if would overlap
+                text_x = last_text_end + 2;
+            }
+        }
+        
+        // Ensure text doesn't go off screen
+        if (text_x + text_width > LCD_WIDTH) {
+            text_x = LCD_WIDTH - text_width;
+        }
+        
+        // Only draw if we have space
+        if (text_x + text_width <= LCD_WIDTH && text_x >= last_text_end) {
+            draw_text(text_x, legend_y + 4, label, 1);
+            last_text_end = text_x + text_width;
+        }
+    }
+    
+    // Draw Hz unit label at the end if there's space
+    if (last_text_end < LCD_WIDTH - 12) {
+        draw_text(LCD_WIDTH - 12, legend_y + 4, "Hz", 1);
+    }
+}
+
+/**
  * @brief Draw spectral analyzer on display
+ * Shows frequency range from 100 Hz to 16 kHz
  */
 static void draw_spectral_analyzer(void) {
     if (!spectrum_valid) {
         return;  // No valid spectrum data yet
     }
     
-    // Draw frequency bars (spectrum)
-    uint8_t bar_width = LCD_WIDTH / FFT_OUTPUT_SIZE;
-    if (bar_width < 1) bar_width = 1;
+    // Reserve space for legend at bottom (10 pixels)
+    const uint8_t legend_height = 10;
+    const uint8_t spectrum_height = LCD_HEIGHT - legend_height;
+    const uint8_t spectrum_bottom = LCD_HEIGHT - legend_height - 1;
     
-    for (uint8_t i = 0; i < FFT_OUTPUT_SIZE && i * bar_width < LCD_WIDTH; i++) {
+    // Frequency range to display
+    const uint32_t freq_min = 100;   // 100 Hz
+    const uint32_t freq_max = 16000; // 16 kHz
+    
+    // Calculate frequency per bin and per pixel
+    float freq_per_bin = (float)SAMPLE_RATE / (float)FFT_SIZE;  // ~1500 Hz per bin
+    float freq_range = (float)(freq_max - freq_min);
+    float freq_per_pixel = freq_range / (float)(LCD_WIDTH - 1);
+    
+    // Draw spectrum bars - map each pixel to a frequency in the 100 Hz - 16 kHz range
+    for (uint8_t x = 0; x < LCD_WIDTH; x++) {
+        // Calculate frequency for this pixel
+        float freq = (float)freq_min + (float)x * freq_per_pixel;
+        
+        // Find corresponding FFT bin (interpolate between bins)
+        float bin_float = freq / freq_per_bin;
+        uint8_t bin_low = (uint8_t)bin_float;
+        uint8_t bin_high = bin_low + 1;
+        float bin_fraction = bin_float - (float)bin_low;
+        
+        // Get magnitude from FFT bins (with interpolation if needed)
+        float magnitude = 0.0f;
+        if (bin_low < FFT_OUTPUT_SIZE) {
+            if (bin_high < FFT_OUTPUT_SIZE && bin_fraction > 0.01f) {
+                // Interpolate between two bins (only if fraction is significant)
+                magnitude = spectrum_magnitude[bin_low] * (1.0f - bin_fraction) + 
+                           spectrum_magnitude[bin_high] * bin_fraction;
+            } else {
+                // Use only lower bin
+                magnitude = spectrum_magnitude[bin_low];
+            }
+        } else {
+            // Clamp to last available bin if beyond range
+            magnitude = spectrum_magnitude[FFT_OUTPUT_SIZE - 1];
+        }
+        
         // Calculate bar height from magnitude (0.0 to 1.0)
-        float magnitude = spectrum_magnitude[i];
-        uint8_t bar_height = (uint8_t)(magnitude * (LCD_HEIGHT - 4));  // Leave 4 pixels at bottom
+        uint8_t bar_height = (uint8_t)(magnitude * spectrum_height);
         
         // Clamp bar height
-        if (bar_height > LCD_HEIGHT - 4) {
-            bar_height = LCD_HEIGHT - 4;
+        if (bar_height > spectrum_height) {
+            bar_height = spectrum_height;
         }
         
         // Draw bar from bottom up
-        uint8_t x_start = i * bar_width;
-        uint8_t x_end = x_start + bar_width - 1;
-        if (x_end >= LCD_WIDTH) x_end = LCD_WIDTH - 1;
-        
-        uint8_t y_bottom = LCD_HEIGHT - 1;
+        uint8_t y_bottom = spectrum_bottom;
         uint8_t y_top = y_bottom - bar_height;
         
-        // Fill bar
-        for (uint8_t x = x_start; x <= x_end; x++) {
-            for (uint8_t y = y_top; y <= y_bottom; y++) {
-                lcd_display_set_pixel(x, y, 1);
-            }
+        // Draw vertical line for this pixel
+        for (uint8_t y = y_top; y <= y_bottom; y++) {
+            lcd_display_set_pixel(x, y, 1);
         }
     }
     
-    // Draw frequency labels at key points (optional, can be removed if too cluttered)
-    // For now, we'll just draw a baseline
+    // Draw baseline at bottom of spectrum area
     for (uint8_t x = 0; x < LCD_WIDTH; x += 2) {
-        lcd_display_set_pixel(x, LCD_HEIGHT - 1, 1);
+        lcd_display_set_pixel(x, spectrum_bottom, 1);
     }
+    
+    // Draw frequency legend
+    draw_frequency_legend();
 }
 
 /**

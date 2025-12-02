@@ -24,7 +24,7 @@ static void wifi_connection_callback(bool connected, const char *ip_str) {
         // Show confirmation message on LCD
         if (lcd_task_is_running()) {
             char message[32];
-            snprintf(message, sizeof(message), "WiFi: %s", ip_str);
+            snprintf(message, sizeof(message), "%s", ip_str);
             lcd_task_show_message(message);
         }
         
