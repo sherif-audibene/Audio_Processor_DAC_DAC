@@ -16,6 +16,8 @@ typedef struct {
     float delay_time_ms;
     float delay_mix;
     float delay_feedback;
+    bool enable_pitch_shift;
+    float pitch_ratio;  // 1.0 = no change, 2.0 = octave up, 0.5 = octave down
 } audio_effects_config_t;
 
 /**

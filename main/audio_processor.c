@@ -38,7 +38,9 @@ esp_err_t audio_processor_init(const audio_config_t *config) {
         .enable_delay = config->enable_delay,
         .delay_time_ms = config->delay_time_ms,
         .delay_mix = config->delay_mix,
-        .delay_feedback = config->delay_feedback
+        .delay_feedback = config->delay_feedback,
+        .enable_pitch_shift = config->enable_pitch_shift,
+        .pitch_ratio = config->pitch_ratio
     };
 
     ret = audio_effects_init(&effects_config);
@@ -106,7 +108,9 @@ void audio_processor_update_config(const audio_config_t *config) {
         .enable_delay = config->enable_delay,
         .delay_time_ms = config->delay_time_ms,
         .delay_mix = config->delay_mix,
-        .delay_feedback = config->delay_feedback
+        .delay_feedback = config->delay_feedback,
+        .enable_pitch_shift = config->enable_pitch_shift,
+        .pitch_ratio = config->pitch_ratio
     };
 
     audio_effects_update_config(&effects_config);

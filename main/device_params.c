@@ -19,6 +19,8 @@ void device_params_get_defaults(device_params_t *params) {
     params->audio.delay_time_ms = 50.0f;
     params->audio.delay_mix = 0.9f;
     params->audio.delay_feedback = 0.4f;
+    params->audio.enable_pitch_shift = false;
+    params->audio.pitch_ratio = 1.0f;  // 1.0 = no pitch change
     
     // Default LCD configuration
     params->lcd.sda_pin = 6;

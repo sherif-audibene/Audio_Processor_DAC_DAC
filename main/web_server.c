@@ -71,6 +71,13 @@ static const char* html_page =
 "<label>Delay Feedback: <span class='range-value' id='delayFeedbackValue'>0.4</span></label>"
 "<input type='range' id='delayFeedback' name='delay_feedback' min='0' max='1' step='0.1' value='0.4' oninput='document.getElementById(\"delayFeedbackValue\").textContent=this.value'>"
 "</div>"
+"<div class='form-group'>"
+"<label><input type='checkbox' id='enablePitchShift' name='enable_pitch_shift'> Enable Pitch Shift</label>"
+"</div>"
+"<div class='form-group'>"
+"<label>Pitch Ratio: <span class='range-value' id='pitchRatioValue'>1.0</span> (1.0 = normal, 2.0 = octave up, 0.5 = octave down)</label>"
+"<input type='range' id='pitchRatio' name='pitch_ratio' min='0.5' max='2.0' step='0.05' value='1.0' oninput='document.getElementById(\"pitchRatioValue\").textContent=this.value'>"
+"</div>"
 "</div>"
 "<div class='section'>"
 "<h2>LCD Display Settings</h2>"
@@ -180,6 +187,9 @@ static const char* html_page =
 "            document.getElementById('delayMixValue').textContent = cfg.audio.delay_mix;"
 "            document.getElementById('delayFeedback').value = cfg.audio.delay_feedback;"
 "            document.getElementById('delayFeedbackValue').textContent = cfg.audio.delay_feedback;"
+"            document.getElementById('enablePitchShift').checked = cfg.audio.enable_pitch_shift;"
+"            document.getElementById('pitchRatio').value = cfg.audio.pitch_ratio;"
+"            document.getElementById('pitchRatioValue').textContent = cfg.audio.pitch_ratio;"
 "            document.getElementById('lcdContrast').value = cfg.lcd.lcd_contrast;"
 "            document.getElementById('contrastValue').textContent = cfg.lcd.lcd_contrast;"
 "            document.getElementById('samplesPerScreen').value = cfg.lcd.waveform.samples_per_screen;"
@@ -220,7 +230,9 @@ static const char* html_page =
 "            enable_delay: formData.has('enable_delay'),"
 "            delay_time_ms: parseFloat(formData.get('delay_time_ms')),"
 "            delay_mix: parseFloat(formData.get('delay_mix')),"
-"            delay_feedback: parseFloat(formData.get('delay_feedback'))"
+"            delay_feedback: parseFloat(formData.get('delay_feedback')),"
+"            enable_pitch_shift: formData.has('enable_pitch_shift'),"
+"            pitch_ratio: parseFloat(formData.get('pitch_ratio'))"
 "        },"
 "        lcd: {"
 "            lcd_contrast: parseInt(formData.get('lcd_contrast')),"
@@ -301,6 +313,8 @@ static esp_err_t api_get_config_handler(httpd_req_t *req) {
         cJSON_AddNumberToObject(audio_json, "delay_time_ms", params.audio.delay_time_ms);
         cJSON_AddNumberToObject(audio_json, "delay_mix", params.audio.delay_mix);
         cJSON_AddNumberToObject(audio_json, "delay_feedback", params.audio.delay_feedback);
+        cJSON_AddBoolToObject(audio_json, "enable_pitch_shift", params.audio.enable_pitch_shift);
+        cJSON_AddNumberToObject(audio_json, "pitch_ratio", params.audio.pitch_ratio);
         
         // LCD config
         cJSON_AddNumberToObject(lcd_json, "lcd_contrast", params.lcd.lcd_contrast);
@@ -376,6 +390,10 @@ static esp_err_t api_post_config_handler(httpd_req_t *req) {
         if (item) params.audio.delay_mix = item->valuedouble;
         item = cJSON_GetObjectItem(audio_json, "delay_feedback");
         if (item) params.audio.delay_feedback = item->valuedouble;
+        item = cJSON_GetObjectItem(audio_json, "enable_pitch_shift");
+        if (item) params.audio.enable_pitch_shift = cJSON_IsTrue(item);
+        item = cJSON_GetObjectItem(audio_json, "pitch_ratio");
+        if (item) params.audio.pitch_ratio = item->valuedouble;
     }
     
     // Parse LCD config
