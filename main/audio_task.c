@@ -1,6 +1,7 @@
 #include "audio_task.h"
 #include "audio_effects.h"
 #include "audio_buffer_manager.h"
+#include "esp_err.h"
 #include "i2s_config.h"
 #include "lcd_task.h"
 #include "led_control.h"
@@ -86,7 +87,7 @@ static void audio_passthrough_task(void *pvParameters) {
 
         // LCD task reads directly from audio_buffer - no need to send data!
         // The buffer is shared and protected by mutex
-
+        
         // Write to DAC
         ret = i2s_write(I2S_NUM, audio_buffer, bytes_read, &bytes_written, 
                        pdMS_TO_TICKS(AUDIO_WRITE_TIMEOUT_MS));

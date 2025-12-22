@@ -32,8 +32,13 @@ static size_t waveform_buffer_index = 0;
 static bool waveform_buffer_filled = false;  // Track if we have valid samples
 
 // FFT spectrum buffer
-static float spectrum_magnitude[FFT_OUTPUT_SIZE];
+static float spectrum_magnitude[FFT_OUTPUT_SIZE];      // Raw FFT output
+static float spectrum_smoothed[FFT_OUTPUT_SIZE];       // Smoothed for display
 static bool spectrum_valid = false;
+
+// Spectrum smoothing parameters
+#define SPECTRUM_SMOOTHING_FACTOR 0.3f   // Lower = smoother (0.1-0.5 typical)
+#define SPECTRUM_DECAY_FACTOR 0.92f       // Peak decay rate (0.9-0.98 typical)
 
 // Message display
 #define MAX_MESSAGE_LEN 32
@@ -322,7 +327,8 @@ static void draw_spectral_analyzer(void) {
     const uint32_t freq_max = 16000; // 16 kHz
     
     // Calculate frequency per bin and per pixel
-    float freq_per_bin = (float)SAMPLE_RATE / (float)FFT_SIZE;  // ~1500 Hz per bin
+    // With FFT_SIZE=256 and SAMPLE_RATE=192kHz: 192000/256 = 750 Hz per bin
+    float freq_per_bin = (float)SAMPLE_RATE / (float)FFT_SIZE;
     float freq_range = (float)(freq_max - freq_min);
     float freq_per_pixel = freq_range / (float)(LCD_WIDTH - 1);
     
@@ -337,20 +343,20 @@ static void draw_spectral_analyzer(void) {
         uint8_t bin_high = bin_low + 1;
         float bin_fraction = bin_float - (float)bin_low;
         
-        // Get magnitude from FFT bins (with interpolation if needed)
+        // Get magnitude from smoothed FFT bins (with interpolation if needed)
         float magnitude = 0.0f;
         if (bin_low < FFT_OUTPUT_SIZE) {
             if (bin_high < FFT_OUTPUT_SIZE && bin_fraction > 0.01f) {
                 // Interpolate between two bins (only if fraction is significant)
-                magnitude = spectrum_magnitude[bin_low] * (1.0f - bin_fraction) + 
-                           spectrum_magnitude[bin_high] * bin_fraction;
+                magnitude = spectrum_smoothed[bin_low] * (1.0f - bin_fraction) + 
+                           spectrum_smoothed[bin_high] * bin_fraction;
             } else {
                 // Use only lower bin
-                magnitude = spectrum_magnitude[bin_low];
+                magnitude = spectrum_smoothed[bin_low];
             }
         } else {
             // Clamp to last available bin if beyond range
-            magnitude = spectrum_magnitude[FFT_OUTPUT_SIZE - 1];
+            magnitude = spectrum_smoothed[FFT_OUTPUT_SIZE - 1];
         }
         
         // Calculate bar height from magnitude (0.0 to 1.0)
@@ -475,6 +481,23 @@ static void process_audio_data_from_source(void) {
             // When we have enough samples, compute FFT
             if (fft_sample_index >= FFT_SIZE) {
                 if (fft_analyzer_compute(fft_samples, FFT_SIZE, spectrum_magnitude) == ESP_OK) {
+                    // Apply smoothing: exponential moving average with peak hold
+                    for (size_t j = 0; j < FFT_OUTPUT_SIZE; j++) {
+                        float new_val = spectrum_magnitude[j];
+                        float old_val = spectrum_smoothed[j];
+                        
+                        if (new_val > old_val) {
+                            // Rising: use faster attack
+                            spectrum_smoothed[j] = old_val + SPECTRUM_SMOOTHING_FACTOR * (new_val - old_val);
+                        } else {
+                            // Falling: use slower decay for smooth drop
+                            spectrum_smoothed[j] = old_val * SPECTRUM_DECAY_FACTOR;
+                            // But don't let it go below the new value
+                            if (spectrum_smoothed[j] < new_val) {
+                                spectrum_smoothed[j] = new_val;
+                            }
+                        }
+                    }
                     spectrum_valid = true;
                 }
                 // Keep last half of samples for overlap (better frequency resolution)
@@ -654,8 +677,9 @@ esp_err_t lcd_task_start(const lcd_task_config_t *config) {
         // Continue anyway - waveform mode will still work
     }
     
-    // Initialize spectrum buffer
+    // Initialize spectrum buffers
     memset(spectrum_magnitude, 0, sizeof(spectrum_magnitude));
+    memset(spectrum_smoothed, 0, sizeof(spectrum_smoothed));
     spectrum_valid = false;
     
     // Create LCD task
