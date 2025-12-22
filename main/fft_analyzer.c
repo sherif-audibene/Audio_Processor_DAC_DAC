@@ -15,6 +15,23 @@
 
 static const char *TAG = "FFT_ANALYZER";
 
+// ============================================================================
+// SPECTRUM DISPLAY TUNING PARAMETERS
+// Adjust these to change noise sensitivity
+// ============================================================================
+
+// Dynamic range in dB (signals below this threshold from max are ignored)
+// Lower value = less sensitive to noise (try 30-50)
+// Higher value = more sensitive, shows quieter signals (try 50-80)
+#define FFT_DYNAMIC_RANGE_DB    40.0f
+
+// Noise floor threshold (normalized 0.0-1.0)
+// Signals below this level are set to zero
+// Higher value = more noise rejection (try 0.05-0.15)
+#define FFT_NOISE_FLOOR         0.05f
+
+// ============================================================================
+
 // FFT working buffers - aligned for SIMD operations
 __attribute__((aligned(16)))
 static float fft_window[FFT_SIZE];
@@ -109,12 +126,17 @@ esp_err_t fft_analyzer_compute(const int16_t *samples, size_t num_samples, float
         float magnitude_db = 10.0f * log10f((magnitude_sq / (float)FFT_SIZE) + 1e-10f);
         
         // Normalize to 0.0-1.0 range for display
-        // Assuming -60dB to 0dB dynamic range
-        float normalized = (magnitude_db + 60.0f) / 60.0f;
+        // Map from -FFT_DYNAMIC_RANGE_DB to 0dB
+        float normalized = (magnitude_db + FFT_DYNAMIC_RANGE_DB) / FFT_DYNAMIC_RANGE_DB;
         
         // Clamp to valid range
         if (normalized < 0.0f) normalized = 0.0f;
         if (normalized > 1.0f) normalized = 1.0f;
+        
+        // Apply noise floor threshold
+        if (normalized < FFT_NOISE_FLOOR) {
+            normalized = 0.0f;
+        }
         
         output_magnitude[i] = normalized;
     }
