@@ -13,6 +13,13 @@
 
 static const char *TAG = "LCD_TASK";
 
+// ============================================================================
+// FFT FREQUENCY MAPPING
+// The effective sample rate for FFT frequency calculation
+// Adjust this multiplier if the frequency display is off
+// ============================================================================
+#define FFT_EFFECTIVE_SAMPLE_RATE  (SAMPLE_RATE)  // Use full sample rate
+
 // Task handle
 static TaskHandle_t lcd_task_handle = NULL;
 
@@ -220,7 +227,7 @@ static void draw_message_overlay(void) {
 static uint32_t calculate_frequency_for_bin(uint8_t bin_index) {
     // Frequency per bin = sample_rate / FFT_SIZE
     // Each bin represents a frequency range
-    float freq_per_bin = (float)SAMPLE_RATE / (float)FFT_SIZE;
+    float freq_per_bin = (float)FFT_EFFECTIVE_SAMPLE_RATE / (float)FFT_SIZE;
     return (uint32_t)(bin_index * freq_per_bin);
 }
 
@@ -327,8 +334,8 @@ static void draw_spectral_analyzer(void) {
     const uint32_t freq_max = 16000; // 16 kHz
     
     // Calculate frequency per bin and per pixel
-    // With FFT_SIZE=256 and SAMPLE_RATE=192kHz: 192000/256 = 750 Hz per bin
-    float freq_per_bin = (float)SAMPLE_RATE / (float)FFT_SIZE;
+    // With FFT_SIZE=256 and effective rate=96kHz: 96000/256 = 375 Hz per bin
+    float freq_per_bin = (float)FFT_EFFECTIVE_SAMPLE_RATE / (float)FFT_SIZE;
     float freq_range = (float)(freq_max - freq_min);
     float freq_per_pixel = freq_range / (float)(LCD_WIDTH - 1);
     
