@@ -107,28 +107,6 @@ static const char* html_page =
 "<label><input type='checkbox' id='showCenterLine' name='show_center_line' checked> Show Center Line</label>"
 "</div>"
 "</div>"
-"<div class='section'>"
-"<h2>LED Control Settings</h2>"
-"<div class='form-group'>"
-"<label>Low Threshold: <span class='range-value' id='lowThresholdValue'>0.15</span></label>"
-"<input type='range' id='lowThreshold' name='low_threshold' min='0' max='1' step='0.05' value='0.15' oninput='document.getElementById(\"lowThresholdValue\").textContent=this.value'>"
-"</div>"
-"<div class='form-group'>"
-"<label>Medium Threshold: <span class='range-value' id='mediumThresholdValue'>0.35</span></label>"
-"<input type='range' id='mediumThreshold' name='medium_threshold' min='0' max='1' step='0.05' value='0.35' oninput='document.getElementById(\"mediumThresholdValue\").textContent=this.value'>"
-"</div>"
-"<div class='form-group'>"
-"<label>High Threshold: <span class='range-value' id='highThresholdValue'>0.65</span></label>"
-"<input type='range' id='highThreshold' name='high_threshold' min='0' max='1' step='0.05' value='0.65' oninput='document.getElementById(\"highThresholdValue\").textContent=this.value'>"
-"</div>"
-"<div class='form-group'>"
-"<label>Smoothing Factor: <span class='range-value' id='smoothingValue'>0.2</span></label>"
-"<input type='range' id='smoothingFactor' name='smoothing_factor' min='0' max='1' step='0.05' value='0.2' oninput='document.getElementById(\"smoothingValue\").textContent=this.value'>"
-"</div>"
-"<div class='form-group'>"
-"<label><input type='checkbox' id='enableLEDs' name='enable_leds' checked> Enable LEDs</label>"
-"</div>"
-"</div>"
 "<button type='button' onclick='loadConfig()'>Load Current Settings</button>"
 "<button type='button' onclick='saveConfig()'>Save Settings</button>"
 "<button type='button' class='secondary' onclick='resetConfig()'>Reset to Defaults</button>"
@@ -201,15 +179,6 @@ static const char* html_page =
 "            if (cfg.lcd.waveform.mode) {"
 "                document.getElementById('displayMode').value = cfg.lcd.waveform.mode;"
 "            }"
-"            document.getElementById('lowThreshold').value = cfg.led.low_threshold;"
-"            document.getElementById('lowThresholdValue').textContent = cfg.led.low_threshold;"
-"            document.getElementById('mediumThreshold').value = cfg.led.medium_threshold;"
-"            document.getElementById('mediumThresholdValue').textContent = cfg.led.medium_threshold;"
-"            document.getElementById('highThreshold').value = cfg.led.high_threshold;"
-"            document.getElementById('highThresholdValue').textContent = cfg.led.high_threshold;"
-"            document.getElementById('smoothingFactor').value = cfg.led.smoothing_factor;"
-"            document.getElementById('smoothingValue').textContent = cfg.led.smoothing_factor;"
-"            document.getElementById('enableLEDs').checked = cfg.led.enable_leds;"
 "            showStatus('Configuration loaded successfully');"
 "        } else {"
 "            showStatus('Failed to load configuration', true);"
@@ -243,13 +212,6 @@ static const char* html_page =
 "                show_center_line: formData.has('show_center_line'),"
 "                mode: formData.get('display_mode') || 'oscilloscope'"
 "            }"
-"        },"
-"        led: {"
-"            low_threshold: parseFloat(formData.get('low_threshold')),"
-"            medium_threshold: parseFloat(formData.get('medium_threshold')),"
-"            high_threshold: parseFloat(formData.get('high_threshold')),"
-"            smoothing_factor: parseFloat(formData.get('smoothing_factor')),"
-"            enable_leds: formData.has('enable_leds')"
 "        }"
 "    };"
 "    try {"
@@ -297,7 +259,6 @@ static esp_err_t api_get_config_handler(httpd_req_t *req) {
     cJSON *audio_json = cJSON_CreateObject();
     cJSON *lcd_json = cJSON_CreateObject();
     cJSON *lcd_waveform_json = cJSON_CreateObject();
-    cJSON *led_json = cJSON_CreateObject();
     
     if (device_params_get(&params) != ESP_OK) {
         cJSON_AddBoolToObject(json, "success", false);
@@ -326,16 +287,8 @@ static esp_err_t api_get_config_handler(httpd_req_t *req) {
         cJSON_AddStringToObject(lcd_waveform_json, "mode", mode_str);
         cJSON_AddItemToObject(lcd_json, "waveform", lcd_waveform_json);
         
-        // LED config
-        cJSON_AddNumberToObject(led_json, "low_threshold", params.led.low_threshold);
-        cJSON_AddNumberToObject(led_json, "medium_threshold", params.led.medium_threshold);
-        cJSON_AddNumberToObject(led_json, "high_threshold", params.led.high_threshold);
-        cJSON_AddNumberToObject(led_json, "smoothing_factor", params.led.smoothing_factor);
-        cJSON_AddBoolToObject(led_json, "enable_leds", params.led.enable_leds);
-        
         cJSON_AddItemToObject(json, "audio", audio_json);
         cJSON_AddItemToObject(json, "lcd", lcd_json);
-        cJSON_AddItemToObject(json, "led", led_json);
     }
     
     char *json_str = cJSON_Print(json);
@@ -421,21 +374,6 @@ static esp_err_t api_post_config_handler(httpd_req_t *req) {
                 }
             }
         }
-    }
-    
-    // Parse LED config
-    cJSON *led_json = cJSON_GetObjectItem(json, "led");
-    if (led_json) {
-        cJSON *item = cJSON_GetObjectItem(led_json, "low_threshold");
-        if (item) params.led.low_threshold = item->valuedouble;
-        item = cJSON_GetObjectItem(led_json, "medium_threshold");
-        if (item) params.led.medium_threshold = item->valuedouble;
-        item = cJSON_GetObjectItem(led_json, "high_threshold");
-        if (item) params.led.high_threshold = item->valuedouble;
-        item = cJSON_GetObjectItem(led_json, "smoothing_factor");
-        if (item) params.led.smoothing_factor = item->valuedouble;
-        item = cJSON_GetObjectItem(led_json, "enable_leds");
-        if (item) params.led.enable_leds = cJSON_IsTrue(item);
     }
     
     cJSON_Delete(json);
