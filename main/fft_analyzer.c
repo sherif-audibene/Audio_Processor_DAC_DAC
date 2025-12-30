@@ -28,7 +28,7 @@ static const char *TAG = "FFT_ANALYZER";
 // Noise floor threshold (normalized 0.0-1.0)
 // Signals below this level are set to zero
 // Higher value = more noise rejection (try 0.05-0.15)
-#define FFT_NOISE_FLOOR         0.05f
+#define FFT_NOISE_FLOOR         0.15f
 
 // ============================================================================
 
