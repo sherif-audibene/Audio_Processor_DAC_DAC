@@ -15,7 +15,8 @@
  */
 typedef enum {
     WAVEFORM_MODE_OSCILLOSCOPE,  // Traditional oscilloscope view
-    WAVEFORM_MODE_SPECTRUM,      // Spectrum analyzer (future implementation)
+    WAVEFORM_MODE_SPECTRUM,      // Spectrum analyzer
+    WAVEFORM_MODE_STATS,         // CPU/System stats display
     WAVEFORM_MODE_VU_METER       // VU meter (future implementation)
 } waveform_mode_t;
 

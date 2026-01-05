@@ -10,6 +10,7 @@
 #include "wifi_manager.h"
 #include "web_server.h"
 #include "device_params.h"
+#include "cpu_monitor.h"
 #include "freertos/task.h"
 
 static const char *TAG = "MAIN";
@@ -223,5 +224,12 @@ void app_main(void) {
         if (wifi_manager_get_ip(ip_str, sizeof(ip_str)) == ESP_OK) {
             ESP_LOGI(TAG, "Web interface available at: http://%s", ip_str);
         }
+    }
+
+    // Initialize CPU monitor for performance tracking (used by LCD stats mode)
+    ret = cpu_monitor_init();
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "CPU monitoring enabled - switch to STATS mode on LCD to view");
+        // Note: To enable console logging, call: cpu_monitor_start_periodic(10);
     }
 }

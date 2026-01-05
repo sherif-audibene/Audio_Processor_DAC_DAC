@@ -86,6 +86,7 @@ static const char* html_page =
 "<select id='displayMode' name='display_mode' style='width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;'>"
 "<option value='oscilloscope'>Oscilloscope (Waveform)</option>"
 "<option value='spectrum'>Spectral Analyzer (FFT)</option>"
+"<option value='stats'>System Stats (CPU/Memory)</option>"
 "</select>"
 "</div>"
 "<div class='form-group'>"
@@ -283,7 +284,12 @@ static esp_err_t api_get_config_handler(httpd_req_t *req) {
         cJSON_AddNumberToObject(lcd_waveform_json, "amplitude_scale", params.lcd.waveform.amplitude_scale);
         cJSON_AddBoolToObject(lcd_waveform_json, "show_grid", params.lcd.waveform.show_grid);
         cJSON_AddBoolToObject(lcd_waveform_json, "show_center_line", params.lcd.waveform.show_center_line);
-        const char *mode_str = (params.lcd.waveform.mode == WAVEFORM_MODE_SPECTRUM) ? "spectrum" : "oscilloscope";
+        const char *mode_str;
+        switch (params.lcd.waveform.mode) {
+            case WAVEFORM_MODE_SPECTRUM: mode_str = "spectrum"; break;
+            case WAVEFORM_MODE_STATS: mode_str = "stats"; break;
+            default: mode_str = "oscilloscope"; break;
+        }
         cJSON_AddStringToObject(lcd_waveform_json, "mode", mode_str);
         cJSON_AddItemToObject(lcd_json, "waveform", lcd_waveform_json);
         
@@ -369,6 +375,8 @@ static esp_err_t api_post_config_handler(httpd_req_t *req) {
                 const char *mode_str = item->valuestring;
                 if (strcmp(mode_str, "spectrum") == 0 || strcmp(mode_str, "spectral") == 0) {
                     params.lcd.waveform.mode = WAVEFORM_MODE_SPECTRUM;
+                } else if (strcmp(mode_str, "stats") == 0) {
+                    params.lcd.waveform.mode = WAVEFORM_MODE_STATS;
                 } else {
                     params.lcd.waveform.mode = WAVEFORM_MODE_OSCILLOSCOPE;
                 }
@@ -455,10 +463,12 @@ static esp_err_t api_display_mode_handler(httpd_req_t *req) {
         mode = WAVEFORM_MODE_OSCILLOSCOPE;
     } else if (strcmp(mode_str, "spectrum") == 0 || strcmp(mode_str, "spectral") == 0) {
         mode = WAVEFORM_MODE_SPECTRUM;
+    } else if (strcmp(mode_str, "stats") == 0) {
+        mode = WAVEFORM_MODE_STATS;
     } else {
         cJSON_Delete(json);
         httpd_resp_set_status(req, "400 Bad Request");
-        httpd_resp_send(req, "Invalid mode. Use 'oscilloscope' or 'spectrum'", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send(req, "Invalid mode. Use 'oscilloscope', 'spectrum', or 'stats'", HTTPD_RESP_USE_STRLEN);
         return ESP_FAIL;
     }
     
@@ -512,6 +522,9 @@ static esp_err_t api_get_display_mode_handler(httpd_req_t *req) {
                 break;
             case WAVEFORM_MODE_SPECTRUM:
                 mode_str = "spectrum";
+                break;
+            case WAVEFORM_MODE_STATS:
+                mode_str = "stats";
                 break;
             default:
                 mode_str = "oscilloscope";

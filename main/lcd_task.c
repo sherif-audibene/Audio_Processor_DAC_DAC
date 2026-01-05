@@ -1,6 +1,7 @@
 #include "lcd_task.h"
 #include "lcd_display.h"
 #include "fft_analyzer.h"
+#include "cpu_monitor.h"
 #include "i2s_config.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -394,6 +395,82 @@ static void draw_spectral_analyzer(void) {
 }
 
 /**
+ * @brief Draw a horizontal bar graph
+ */
+static void draw_bar(uint8_t x, uint8_t y, uint8_t width, uint8_t height, float percentage) {
+    if (percentage < 0) percentage = 0;
+    if (percentage > 100) percentage = 100;
+    
+    uint8_t fill_width = (uint8_t)((percentage / 100.0f) * width);
+    
+    // Draw border
+    lcd_display_draw_rect(x, y, width, height, 1);
+    
+    // Fill bar
+    if (fill_width > 2) {
+        lcd_display_fill_rect(x + 1, y + 1, fill_width - 2, height - 2, 1);
+    }
+}
+
+/**
+ * @brief Draw system stats on display (CPU usage, memory, etc.)
+ */
+static void draw_stats_display(void) {
+    cpu_stats_t stats;
+    cpu_monitor_get_stats(&stats);
+    
+    char line[24];
+    const uint8_t bar_width = 60;
+    const uint8_t bar_height = 8;
+    const uint8_t text_x = 2;
+    const uint8_t bar_x = 62;
+    
+    // Title
+    draw_text(35, 0, "SYSTEM STATS", 1);
+    
+    // Separator line
+    for (uint8_t x = 0; x < LCD_WIDTH; x++) {
+        lcd_display_set_pixel(x, 9, 1);
+    }
+    
+    // Core 0 (Effects Processing)
+    draw_text(text_x, 12, "CORE0", 1);
+    snprintf(line, sizeof(line), "%d%%", (int)stats.core0_usage);
+    draw_text(text_x + 36, 12, line, 1);
+    draw_bar(bar_x, 11, bar_width, bar_height, stats.core0_usage);
+    
+    // Core 1 (Audio I/O)
+    draw_text(text_x, 22, "CORE1", 1);
+    snprintf(line, sizeof(line), "%d%%", (int)stats.core1_usage);
+    draw_text(text_x + 36, 22, line, 1);
+    draw_bar(bar_x, 21, bar_width, bar_height, stats.core1_usage);
+    
+    // Combined CPU
+    draw_text(text_x, 32, "TOTAL", 1);
+    snprintf(line, sizeof(line), "%d%%", (int)stats.combined_usage);
+    draw_text(text_x + 36, 32, line, 1);
+    draw_bar(bar_x, 31, bar_width, bar_height, stats.combined_usage);
+    
+    // Separator
+    for (uint8_t x = 0; x < LCD_WIDTH; x++) {
+        lcd_display_set_pixel(x, 42, 1);
+    }
+    
+    // Memory info
+    uint32_t heap_kb = stats.free_heap / 1024;
+    uint32_t min_heap_kb = stats.min_free_heap / 1024;
+    
+    snprintf(line, sizeof(line), "HEAP: %luK", (unsigned long)heap_kb);
+    draw_text(text_x, 45, line, 1);
+    
+    snprintf(line, sizeof(line), "MIN: %luK", (unsigned long)min_heap_kb);
+    draw_text(text_x + 66, 45, line, 1);
+    
+    // Task info line
+    draw_text(text_x, 55, "C0:FX C1:I/O", 1);
+}
+
+/**
  * @brief Draw waveform on display
  */
 static uint32_t draw_count = 0;
@@ -590,6 +667,9 @@ static void lcd_display_task(void *pvParameters) {
             if (display_mode == WAVEFORM_MODE_SPECTRUM) {
                 // Draw spectral analyzer
                 draw_spectral_analyzer();
+            } else if (display_mode == WAVEFORM_MODE_STATS) {
+                // Draw system stats
+                draw_stats_display();
             } else {
                 // Draw center line if enabled (only for waveform mode)
                 if (show_center) {
