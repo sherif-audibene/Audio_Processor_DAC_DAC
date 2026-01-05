@@ -24,31 +24,60 @@ static bool pitch_buffer_primed = false;
 static size_t pitch_samples_written = 0;
 
 // Minimum buffer distance to prevent reading unwritten samples
-static const size_t MIN_BUFFER_DISTANCE = 480;
-static const size_t MIN_SAMPLES_TO_PRIME = 720;  // MIN_BUFFER_DISTANCE + 240
+static const size_t MIN_BUFFER_DISTANCE = 960;   // Increased for more headroom
+static const size_t MIN_SAMPLES_TO_PRIME = 1440; // MIN_BUFFER_DISTANCE * 1.5
+
+// Crossfade for click-free transitions
+static const size_t CROSSFADE_SAMPLES = 64;  // Number of stereo pairs for crossfade
+static float crossfade_progress = 1.0f;      // 0.0 = start of fade, 1.0 = complete
+static int32_t crossfade_left_start = 0;
+static int32_t crossfade_right_start = 0;
 
 /**
  * @brief Allocate pitch buffer
  */
 static esp_err_t allocate_pitch_buffer(void) {
-    // 25ms at 192kHz, stereo pairs
-    const size_t max_pitch_samples = (PITCH_SAMPLE_RATE / 40) * 2;
-    pitch_buffer_size = max_pitch_samples;
-    size_t buffer_bytes = pitch_buffer_size * sizeof(int32_t);
+    // Try larger buffer first (50ms), fall back to smaller (25ms) if allocation fails
+    const size_t buffer_sizes[] = {
+        (PITCH_SAMPLE_RATE / 20) * 2,  // 50ms - preferred (fewer clicks)
+        (PITCH_SAMPLE_RATE / 40) * 2,  // 25ms - fallback
+    };
     
-    // Try internal RAM first, then fall back to regular malloc
-    pitch_buffer = (int32_t *)heap_caps_malloc(buffer_bytes, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
-    if (pitch_buffer == NULL) {
+    for (int i = 0; i < 2; i++) {
+        pitch_buffer_size = buffer_sizes[i];
+        size_t buffer_bytes = pitch_buffer_size * sizeof(int32_t);
+        
+        // Try PSRAM/SPIRAM first (ESP32-S3 typically has external RAM)
+        pitch_buffer = (int32_t *)heap_caps_malloc(buffer_bytes, MALLOC_CAP_SPIRAM);
+        if (pitch_buffer != NULL) {
+            ESP_LOGI(TAG, "Allocated pitch buffer in PSRAM (%u bytes)", (unsigned int)buffer_bytes);
+            break;
+        }
+        
+        // Try internal RAM
+        pitch_buffer = (int32_t *)heap_caps_malloc(buffer_bytes, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+        if (pitch_buffer != NULL) {
+            ESP_LOGI(TAG, "Allocated pitch buffer in internal RAM (%u bytes)", (unsigned int)buffer_bytes);
+            break;
+        }
+        
+        // Try default allocator
         pitch_buffer = (int32_t *)calloc(pitch_buffer_size, sizeof(int32_t));
+        if (pitch_buffer != NULL) {
+            ESP_LOGI(TAG, "Allocated pitch buffer via malloc (%u bytes)", (unsigned int)buffer_bytes);
+            break;
+        }
+        
+        ESP_LOGW(TAG, "Failed to allocate %u bytes, trying smaller buffer...", (unsigned int)buffer_bytes);
     }
     
     if (pitch_buffer == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate pitch buffer (%u bytes), free heap: %u bytes",
-                 (unsigned int)buffer_bytes, (unsigned int)esp_get_free_heap_size());
+        ESP_LOGE(TAG, "Failed to allocate pitch buffer, free heap: %u bytes",
+                 (unsigned int)esp_get_free_heap_size());
         return ESP_ERR_NO_MEM;
     }
     
-    memset(pitch_buffer, 0, buffer_bytes);
+    memset(pitch_buffer, 0, pitch_buffer_size * sizeof(int32_t));
     pitch_write_pos = 0;
     pitch_read_pos = 0.0f;
     pitch_buffer_primed = false;
@@ -80,6 +109,9 @@ static void reset_buffer_state(void) {
     pitch_read_pos = 0.0f;
     pitch_buffer_primed = false;
     pitch_samples_written = 0;
+    crossfade_progress = 1.0f;
+    crossfade_left_start = 0;
+    crossfade_right_start = 0;
     if (pitch_buffer != NULL) {
         memset(pitch_buffer, 0, pitch_buffer_size * sizeof(int32_t));
     }
@@ -188,7 +220,7 @@ void pitch_shift_effect_process(int32_t *left_sample, int32_t *right_sample,
         } else {
             pitch_read_pos = (float)(pitch_buffer_size - (initial_distance - pitch_write_pos));
         }
-        pitch_read_pos = ((int)pitch_read_pos / 2) * 2;
+        pitch_read_pos = (float)(((int)pitch_read_pos / 2) * 2);
         pitch_buffer_primed = true;
     }
 
@@ -215,13 +247,27 @@ void pitch_shift_effect_process(int32_t *left_sample, int32_t *right_sample,
     
     if (distance < MIN_BUFFER_DISTANCE) {
         if (distance < 100) {
+            // Store current sample for crossfade before resetting
+            if (crossfade_progress >= 1.0f) {
+                // Read current position before reset for crossfade
+                size_t curr_idx = ((size_t)pitch_read_pos / 2) * 2;
+                if (curr_idx < pitch_buffer_size) {
+                    crossfade_left_start = pitch_buffer[curr_idx];
+                    crossfade_right_start = pitch_buffer[curr_idx + 1];
+                } else {
+                    crossfade_left_start = input_left;
+                    crossfade_right_start = input_right;
+                }
+                crossfade_progress = 0.0f;  // Start crossfade
+            }
+            
             // Reset read position to safe distance
             if (pitch_write_pos >= MIN_BUFFER_DISTANCE) {
                 pitch_read_pos = (float)(pitch_write_pos - MIN_BUFFER_DISTANCE);
             } else {
                 pitch_read_pos = (float)(pitch_buffer_size - (MIN_BUFFER_DISTANCE - pitch_write_pos));
             }
-            pitch_read_pos = ((int)pitch_read_pos / 2) * 2;
+            pitch_read_pos = (float)(((int)pitch_read_pos / 2) * 2);
             read_pos_int = (size_t)pitch_read_pos;
             distance = (pitch_write_pos >= read_pos_int) ?
                       (pitch_write_pos - read_pos_int) :
@@ -252,11 +298,29 @@ void pitch_shift_effect_process(int32_t *left_sample, int32_t *right_sample,
     // Linear interpolation
     int32_t left1 = pitch_buffer[read_idx];
     int32_t left2 = pitch_buffer[next_idx];
-    *left_sample = (int32_t)(left1 + (left2 - left1) * fraction);
+    int32_t out_left = (int32_t)(left1 + (left2 - left1) * fraction);
 
     int32_t right1 = pitch_buffer[read_idx + 1];
     int32_t right2 = pitch_buffer[next_idx + 1];
-    *right_sample = (int32_t)(right1 + (right2 - right1) * fraction);
+    int32_t out_right = (int32_t)(right1 + (right2 - right1) * fraction);
+
+    // Apply crossfade if in progress (smooth transition after position reset)
+    if (crossfade_progress < 1.0f) {
+        float fade_in = crossfade_progress;
+        float fade_out = 1.0f - crossfade_progress;
+        
+        out_left = (int32_t)(crossfade_left_start * fade_out + out_left * fade_in);
+        out_right = (int32_t)(crossfade_right_start * fade_out + out_right * fade_in);
+        
+        // Advance crossfade (complete over CROSSFADE_SAMPLES)
+        crossfade_progress += 1.0f / (float)CROSSFADE_SAMPLES;
+        if (crossfade_progress > 1.0f) {
+            crossfade_progress = 1.0f;
+        }
+    }
+
+    *left_sample = out_left;
+    *right_sample = out_right;
 }
 
 void pitch_shift_effect_cleanup(void) {
