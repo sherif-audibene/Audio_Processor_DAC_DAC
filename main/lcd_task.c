@@ -433,30 +433,39 @@ static void draw_stats_display(void) {
         lcd_display_set_pixel(x, 9, 1);
     }
     
-    // Core 0 (Effects Processing)
-    draw_text(text_x, 12, "CORE0", 1);
-    snprintf(line, sizeof(line), "%d%%", (int)stats.core0_usage);
-    draw_text(text_x + 36, 12, line, 1);
-    draw_bar(bar_x, 11, bar_width, bar_height, stats.core0_usage);
+    // Check if stats are available
+    bool stats_available = (stats.core0_usage >= 0 && stats.core1_usage >= 0);
     
-    // Core 1 (Audio I/O)
-    draw_text(text_x, 22, "CORE1", 1);
-    snprintf(line, sizeof(line), "%d%%", (int)stats.core1_usage);
-    draw_text(text_x + 36, 22, line, 1);
-    draw_bar(bar_x, 21, bar_width, bar_height, stats.core1_usage);
-    
-    // Combined CPU
-    draw_text(text_x, 32, "TOTAL", 1);
-    snprintf(line, sizeof(line), "%d%%", (int)stats.combined_usage);
-    draw_text(text_x + 36, 32, line, 1);
-    draw_bar(bar_x, 31, bar_width, bar_height, stats.combined_usage);
+    if (stats_available) {
+        // Core 0 (Effects Processing)
+        draw_text(text_x, 12, "CORE0", 1);
+        snprintf(line, sizeof(line), "%d%%", (int)stats.core0_usage);
+        draw_text(text_x + 36, 12, line, 1);
+        draw_bar(bar_x, 11, bar_width, bar_height, stats.core0_usage);
+        
+        // Core 1 (Audio I/O)
+        draw_text(text_x, 22, "CORE1", 1);
+        snprintf(line, sizeof(line), "%d%%", (int)stats.core1_usage);
+        draw_text(text_x + 36, 22, line, 1);
+        draw_bar(bar_x, 21, bar_width, bar_height, stats.core1_usage);
+        
+        // Combined CPU
+        draw_text(text_x, 32, "TOTAL", 1);
+        snprintf(line, sizeof(line), "%d%%", (int)stats.combined_usage);
+        draw_text(text_x + 36, 32, line, 1);
+        draw_bar(bar_x, 31, bar_width, bar_height, stats.combined_usage);
+    } else {
+        draw_text(text_x, 15, "ENABLE RUNTIME STATS", 1);
+        draw_text(text_x, 25, "IN MENUCONFIG:", 1);
+        draw_text(text_x, 35, "FREERTOS > KERNEL", 1);
+    }
     
     // Separator
     for (uint8_t x = 0; x < LCD_WIDTH; x++) {
         lcd_display_set_pixel(x, 42, 1);
     }
     
-    // Memory info
+    // Memory info (always available)
     uint32_t heap_kb = stats.free_heap / 1024;
     uint32_t min_heap_kb = stats.min_free_heap / 1024;
     
@@ -467,7 +476,9 @@ static void draw_stats_display(void) {
     draw_text(text_x + 66, 45, line, 1);
     
     // Task info line
-    draw_text(text_x, 55, "C0:FX C1:I/O", 1);
+    if (stats_available) {
+        draw_text(text_x, 55, "C0:FX C1:I/O", 1);
+    }
 }
 
 /**

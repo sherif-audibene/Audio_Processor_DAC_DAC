@@ -3,83 +3,94 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_freertos_hooks.h"
 #include <string.h>
+#include <stdlib.h>
 
 static const char *TAG = "CPU_MONITOR";
-
-// Idle tick counters per core
-static volatile uint32_t idle_tick_count[2] = {0, 0};
-static uint32_t last_idle_count[2] = {0, 0};
-static int64_t last_time_us = 0;
 
 // Periodic monitoring
 static esp_timer_handle_t monitor_timer = NULL;
 
-/**
- * @brief Idle hook for Core 0
- */
-static bool idle_hook_core0(void) {
-    idle_tick_count[0]++;
-    return false;  // Don't skip idle task
-}
-
-/**
- * @brief Idle hook for Core 1
- */
-static bool idle_hook_core1(void) {
-    idle_tick_count[1]++;
-    return false;
-}
+// Cached CPU usage values
+static float cached_cpu_usage[2] = {0.0f, 0.0f};
+static int64_t last_update_time = 0;
 
 esp_err_t cpu_monitor_init(void) {
-    // Register idle hooks for both cores
-    esp_err_t ret = esp_register_freertos_idle_hook_for_cpu(idle_hook_core0, 0);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register idle hook for Core 0");
-        return ret;
-    }
-    
-    ret = esp_register_freertos_idle_hook_for_cpu(idle_hook_core1, 1);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register idle hook for Core 1");
-        return ret;
-    }
-    
-    last_time_us = esp_timer_get_time();
-    ESP_LOGI(TAG, "CPU monitor initialized");
+    last_update_time = esp_timer_get_time();
+    ESP_LOGI(TAG, "CPU monitor initialized (using FreeRTOS runtime stats)");
     return ESP_OK;
 }
 
-// Cached CPU usage values (updated by print_stats or get_stats)
-static float cached_cpu_usage[2] = {0.0f, 0.0f};
-
+/**
+ * @brief Parse IDLE task percentages from FreeRTOS runtime stats
+ */
 static void update_cpu_usage_internal(void) {
     int64_t now = esp_timer_get_time();
-    int64_t elapsed_us = now - last_time_us;
+    if (now - last_update_time < 1000000) {  // Update every 1 second max
+        return;
+    }
+    last_update_time = now;
     
-    if (elapsed_us < 100000) {  // Need at least 100ms of data
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+    // Get runtime stats and parse IDLE percentages
+    char *stats_buffer = malloc(2048);
+    if (stats_buffer == NULL) {
         return;
     }
     
-    float elapsed_sec = (float)elapsed_us / 1000000.0f;
+    vTaskGetRunTimeStats(stats_buffer);
     
-    for (int i = 0; i < 2; i++) {
-        uint32_t delta = idle_tick_count[i] - last_idle_count[i];
-        float rate = (float)delta / elapsed_sec;
+    // Parse IDLE0 and IDLE1 percentages from the stats string
+    // Format: "taskname\t\truntime\t\tpercentage%"
+    char *line = stats_buffer;
+    while (line && *line) {
+        char *next_line = strchr(line, '\n');
+        if (next_line) *next_line = '\0';
         
-        // Baseline calibration (adjust if needed)
-        const float baseline = 3000000.0f;
+        // Look for IDLE0 and IDLE1 lines
+        if (strstr(line, "IDLE0") != NULL) {
+            // Find the percentage (last number before %)
+            char *pct = strrchr(line, '%');
+            if (pct) {
+                // Walk back to find the number
+                char *num_start = pct - 1;
+                while (num_start > line && ((*num_start >= '0' && *num_start <= '9') || *num_start == '<')) {
+                    num_start--;
+                }
+                num_start++;
+                int idle_pct = atoi(num_start);
+                if (idle_pct > 0 && idle_pct <= 100) {
+                    cached_cpu_usage[0] = 100.0f - (float)idle_pct;
+                }
+            }
+        } else if (strstr(line, "IDLE1") != NULL) {
+            char *pct = strrchr(line, '%');
+            if (pct) {
+                char *num_start = pct - 1;
+                while (num_start > line && ((*num_start >= '0' && *num_start <= '9') || *num_start == '<')) {
+                    num_start--;
+                }
+                num_start++;
+                int idle_pct = atoi(num_start);
+                if (idle_pct > 0 && idle_pct <= 100) {
+                    cached_cpu_usage[1] = 100.0f - (float)idle_pct;
+                }
+            }
+        }
         
-        float usage = 100.0f - (rate / baseline * 100.0f);
-        if (usage < 0) usage = 0;
-        if (usage > 100) usage = 100;
-        
-        cached_cpu_usage[i] = usage;
-        last_idle_count[i] = idle_tick_count[i];
+        if (next_line) {
+            line = next_line + 1;
+        } else {
+            break;
+        }
     }
     
-    last_time_us = now;
+    free(stats_buffer);
+#else
+    // Fallback: show that stats aren't available
+    cached_cpu_usage[0] = -1.0f;
+    cached_cpu_usage[1] = -1.0f;
+#endif
 }
 
 float cpu_monitor_get_core_usage(int core_id) {
