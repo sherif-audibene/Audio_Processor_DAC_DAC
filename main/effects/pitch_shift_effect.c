@@ -24,8 +24,12 @@ static bool pitch_buffer_primed = false;
 static size_t pitch_samples_written = 0;
 
 // Minimum buffer distance to prevent reading unwritten samples
-static const size_t MIN_BUFFER_DISTANCE = 960;   // Increased for more headroom
-static const size_t MIN_SAMPLES_TO_PRIME = 1440; // MIN_BUFFER_DISTANCE * 1.5
+// These are maximums - actual values scale with buffer size
+static const size_t MAX_BUFFER_DISTANCE = 960;   // Maximum distance for larger buffers
+
+// Computed at runtime based on buffer size
+static size_t min_buffer_distance = 960;
+static size_t min_samples_to_prime = 1440;
 
 // Crossfade for click-free transitions
 static const size_t CROSSFADE_SAMPLES = 64;  // Number of stereo pairs for crossfade
@@ -37,13 +41,16 @@ static int32_t crossfade_right_start = 0;
  * @brief Allocate pitch buffer
  */
 static esp_err_t allocate_pitch_buffer(void) {
-    // Try larger buffer first (50ms), fall back to smaller (25ms) if allocation fails
+    // Try progressively smaller buffers until one fits in available memory
     const size_t buffer_sizes[] = {
-        (PITCH_SAMPLE_RATE / 20) * 2,  // 50ms - preferred (fewer clicks)
-        (PITCH_SAMPLE_RATE / 40) * 2,  // 25ms - fallback
+        (PITCH_SAMPLE_RATE / 20) * 2,   // 50ms - 76800 bytes - preferred (fewer clicks)
+        (PITCH_SAMPLE_RATE / 40) * 2,   // 25ms - 38400 bytes
+        (PITCH_SAMPLE_RATE / 80) * 2,   // 12.5ms - 19200 bytes
+        (PITCH_SAMPLE_RATE / 160) * 2,  // 6.25ms - 9600 bytes - minimum viable
     };
+    const int num_sizes = sizeof(buffer_sizes) / sizeof(buffer_sizes[0]);
     
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < num_sizes; i++) {
         pitch_buffer_size = buffer_sizes[i];
         size_t buffer_bytes = pitch_buffer_size * sizeof(int32_t);
         
@@ -68,7 +75,13 @@ static esp_err_t allocate_pitch_buffer(void) {
             break;
         }
         
-        ESP_LOGW(TAG, "Failed to allocate %u bytes, trying smaller buffer...", (unsigned int)buffer_bytes);
+        if (i < num_sizes - 1) {
+            ESP_LOGW(TAG, "Failed to allocate %u bytes, trying smaller buffer...", (unsigned int)buffer_bytes);
+        }
+    }
+    
+    if (pitch_buffer != NULL && pitch_buffer_size < (PITCH_SAMPLE_RATE / 40) * 2) {
+        ESP_LOGW(TAG, "Using minimal pitch buffer - quality may be reduced");
     }
     
     if (pitch_buffer == NULL) {
@@ -82,6 +95,13 @@ static esp_err_t allocate_pitch_buffer(void) {
     pitch_read_pos = 0.0f;
     pitch_buffer_primed = false;
     pitch_samples_written = 0;
+    
+    // Scale buffer distance based on actual buffer size (max 40% of buffer)
+    min_buffer_distance = pitch_buffer_size / 4;
+    if (min_buffer_distance > MAX_BUFFER_DISTANCE) {
+        min_buffer_distance = MAX_BUFFER_DISTANCE;
+    }
+    min_samples_to_prime = (min_buffer_distance * 3) / 2;  // 1.5x distance
     
     return ESP_OK;
 }
@@ -200,16 +220,16 @@ void pitch_shift_effect_process(int32_t *left_sample, int32_t *right_sample,
 
     // Wait until buffer is properly filled before starting to read
     if (!pitch_buffer_primed) {
-        if (pitch_samples_written < MIN_SAMPLES_TO_PRIME) {
+        if (pitch_samples_written < min_samples_to_prime) {
             *left_sample = input_left;
             *right_sample = input_right;
             return;
         }
         
         // Initialize read position behind write position
-        size_t initial_distance = MIN_BUFFER_DISTANCE;
+        size_t initial_distance = min_buffer_distance;
         if (config.pitch_ratio > 1.0f) {
-            initial_distance = (size_t)(MIN_BUFFER_DISTANCE * config.pitch_ratio);
+            initial_distance = (size_t)(min_buffer_distance * config.pitch_ratio);
             if (initial_distance > pitch_buffer_size / 4) {
                 initial_distance = pitch_buffer_size / 4;
             }
@@ -245,7 +265,7 @@ void pitch_shift_effect_process(int32_t *left_sample, int32_t *right_sample,
         distance = pitch_buffer_size - read_pos_int + pitch_write_pos;
     }
     
-    if (distance < MIN_BUFFER_DISTANCE) {
+    if (distance < min_buffer_distance) {
         if (distance < 100) {
             // Store current sample for crossfade before resetting
             if (crossfade_progress >= 1.0f) {
@@ -262,10 +282,10 @@ void pitch_shift_effect_process(int32_t *left_sample, int32_t *right_sample,
             }
             
             // Reset read position to safe distance
-            if (pitch_write_pos >= MIN_BUFFER_DISTANCE) {
-                pitch_read_pos = (float)(pitch_write_pos - MIN_BUFFER_DISTANCE);
+            if (pitch_write_pos >= min_buffer_distance) {
+                pitch_read_pos = (float)(pitch_write_pos - min_buffer_distance);
             } else {
-                pitch_read_pos = (float)(pitch_buffer_size - (MIN_BUFFER_DISTANCE - pitch_write_pos));
+                pitch_read_pos = (float)(pitch_buffer_size - (min_buffer_distance - pitch_write_pos));
             }
             pitch_read_pos = (float)(((int)pitch_read_pos / 2) * 2);
             read_pos_int = (size_t)pitch_read_pos;

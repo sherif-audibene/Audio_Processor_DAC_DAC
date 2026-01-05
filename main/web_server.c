@@ -3,6 +3,7 @@
 #include "lcd_task.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
+#include "esp_system.h"
 #include "cJSON.h"
 #include <string.h>
 
@@ -33,6 +34,8 @@ static const char* html_page =
 "button:hover { background: #45a049; }"
 "button.secondary { background: #2196F3; }"
 "button.secondary:hover { background: #0b7dda; }"
+"button.danger { background: #dc3545; }"
+"button.danger:hover { background: #c82333; }"
 ".status { padding: 10px; margin: 10px 0; border-radius: 4px; }"
 ".status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }"
 ".status.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }"
@@ -93,6 +96,7 @@ static const char* html_page =
 "<button type='button' onclick='loadConfig()'>Load Current Settings</button>"
 "<button type='button' onclick='saveConfig()'>Save Settings</button>"
 "<button type='button' class='secondary' onclick='resetConfig()'>Reset to Defaults</button>"
+"<button type='button' class='danger' onclick='restartDevice()'>🔄 Restart Device</button>"
 "</form>"
 "</div>"
 "<script>"
@@ -213,6 +217,17 @@ static const char* html_page =
 "            }"
 "        } catch (error) {"
 "            showStatus('Error resetting configuration: ' + error, true);"
+"        }"
+"    }"
+"}"
+"async function restartDevice() {"
+"    if (confirm('Are you sure you want to restart the device?')) {"
+"        try {"
+"            showStatus('Restarting device...');"
+"            await fetch('/api/system/restart', { method: 'POST' });"
+"            showStatus('Device is restarting. Please wait and refresh the page in a few seconds.');"
+"        } catch (error) {"
+"            showStatus('Restart command sent. Device may be restarting...');"
 "        }"
 "    }"
 "}"
@@ -521,6 +536,28 @@ static esp_err_t root_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// Handler for POST /api/system/restart
+static esp_err_t api_restart_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Restart requested via web interface");
+    
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddBoolToObject(response, "success", true);
+    cJSON_AddStringToObject(response, "message", "Device will restart shortly");
+    
+    char *response_str = cJSON_Print(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, response_str, strlen(response_str));
+    free(response_str);
+    cJSON_Delete(response);
+    
+    // Give time for response to be sent before restart
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
+    esp_restart();
+    
+    return ESP_OK;  // Won't reach here
+}
+
 esp_err_t web_server_init(void) {
     if (server_handle != NULL) {
         ESP_LOGW(TAG, "Web server already initialized");
@@ -582,6 +619,14 @@ esp_err_t web_server_init(void) {
             .user_ctx = NULL
         };
         httpd_register_uri_handler(server_handle, &api_post_display_mode_uri);
+        
+        httpd_uri_t api_restart_uri = {
+            .uri = "/api/system/restart",
+            .method = HTTP_POST,
+            .handler = api_restart_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server_handle, &api_restart_uri);
         
         ESP_LOGI(TAG, "Web server started successfully");
         return ESP_OK;
