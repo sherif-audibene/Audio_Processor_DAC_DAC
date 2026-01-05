@@ -9,6 +9,8 @@
 #include "fft_analyzer.h"
 #include "esp_log.h"
 #include "esp_dsp.h"
+#include "dsps_mul.h"
+#include "dsps_add.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -42,6 +44,16 @@ static float fft_input[FFT_SIZE];
 // Complex FFT output buffer (interleaved real/imag)
 __attribute__((aligned(16)))
 static float fft_complex[FFT_SIZE * 2];
+
+// Temporary buffers for vectorized magnitude calculation
+__attribute__((aligned(16)))
+static float fft_real_sq[FFT_OUTPUT_SIZE];
+
+__attribute__((aligned(16)))
+static float fft_imag_sq[FFT_OUTPUT_SIZE];
+
+__attribute__((aligned(16)))
+static float fft_magnitude_sq[FFT_OUTPUT_SIZE];
 
 static bool fft_initialized = false;
 
@@ -86,18 +98,17 @@ esp_err_t fft_analyzer_compute(const int16_t *samples, size_t num_samples, float
     // Limit to FFT_SIZE
     size_t samples_to_use = (num_samples > FFT_SIZE) ? FFT_SIZE : num_samples;
     
-    // Convert int16 samples to float and apply window
-    // Normalize to [-1.0, 1.0] range
-    for (size_t i = 0; i < FFT_SIZE; i++) {
-        if (i < samples_to_use) {
-            // Normalize sample and apply Hann window
-            float sample = (float)samples[i] / 32768.0f;
-            fft_input[i] = sample * fft_window[i];
-        } else {
-            // Zero-pad if we have fewer samples
-            fft_input[i] = 0.0f;
-        }
+    // Step 1: Convert int16 samples to float (normalized)
+    for (size_t i = 0; i < samples_to_use; i++) {
+        fft_input[i] = (float)samples[i] / 32768.0f;
     }
+    // Zero-pad remaining samples
+    if (samples_to_use < FFT_SIZE) {
+        memset(&fft_input[samples_to_use], 0, (FFT_SIZE - samples_to_use) * sizeof(float));
+    }
+    
+    // Step 2: Apply Hann window using SIMD multiply (optimized for ESP32-S3)
+    dsps_mul_f32(fft_input, fft_window, fft_input, FFT_SIZE, 1, 1, 1);
     
     // Prepare complex input (real samples with zero imaginary parts)
     // esp-dsp expects interleaved complex data: [Re0, Im0, Re1, Im1, ...]
@@ -106,36 +117,38 @@ esp_err_t fft_analyzer_compute(const int16_t *samples, size_t num_samples, float
         fft_complex[i * 2 + 1] = 0.0f;          // Imaginary part
     }
     
-    // Perform FFT using esp-dsp
+    // Perform FFT using esp-dsp (S3-optimized aes3 version)
     dsps_fft2r_fc32(fft_complex, FFT_SIZE);
     
     // Bit-reverse the output
     dsps_bit_rev_fc32(fft_complex, FFT_SIZE);
     
-    // Compute magnitude spectrum for positive frequencies only
-    // Output is in dB, normalized to 0.0-1.0 range for display
+    // Step 3: Compute magnitude squared using vectorized operations
+    // Extract real parts (step=2 to skip imaginary) and compute real^2
+    dsps_mul_f32(&fft_complex[0], &fft_complex[0], fft_real_sq, FFT_OUTPUT_SIZE, 2, 2, 1);
+    
+    // Extract imag parts (offset 1, step=2) and compute imag^2
+    dsps_mul_f32(&fft_complex[1], &fft_complex[1], fft_imag_sq, FFT_OUTPUT_SIZE, 2, 2, 1);
+    
+    // Add real^2 + imag^2 = magnitude^2 using SIMD
+    dsps_add_f32(fft_real_sq, fft_imag_sq, fft_magnitude_sq, FFT_OUTPUT_SIZE, 1, 1, 1);
+    
+    // Step 4: Convert to dB and normalize (still per-sample due to log)
+    const float inv_fft_size = 1.0f / (float)FFT_SIZE;
+    const float inv_dynamic_range = 1.0f / FFT_DYNAMIC_RANGE_DB;
+    
     for (size_t i = 0; i < FFT_OUTPUT_SIZE; i++) {
-        float real = fft_complex[i * 2 + 0];
-        float imag = fft_complex[i * 2 + 1];
-        
-        // Compute magnitude squared
-        float magnitude_sq = real * real + imag * imag;
-        
         // Convert to dB scale (with floor to avoid log(0))
-        // Normalize by FFT size for proper scaling
-        float magnitude_db = 10.0f * log10f((magnitude_sq / (float)FFT_SIZE) + 1e-10f);
+        float magnitude_db = 10.0f * log10f((fft_magnitude_sq[i] * inv_fft_size) + 1e-10f);
         
         // Normalize to 0.0-1.0 range for display
-        // Map from -FFT_DYNAMIC_RANGE_DB to 0dB
-        float normalized = (magnitude_db + FFT_DYNAMIC_RANGE_DB) / FFT_DYNAMIC_RANGE_DB;
+        float normalized = (magnitude_db + FFT_DYNAMIC_RANGE_DB) * inv_dynamic_range;
         
-        // Clamp to valid range
-        if (normalized < 0.0f) normalized = 0.0f;
-        if (normalized > 1.0f) normalized = 1.0f;
-        
-        // Apply noise floor threshold
+        // Clamp and apply noise floor threshold
         if (normalized < FFT_NOISE_FLOOR) {
             normalized = 0.0f;
+        } else if (normalized > 1.0f) {
+            normalized = 1.0f;
         }
         
         output_magnitude[i] = normalized;

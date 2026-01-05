@@ -8,7 +8,7 @@
 // FFT configuration - using esp-dsp library
 // 256 samples provides good frequency resolution at 192kHz sample rate
 // Each bin = 192000 / 256 = 750 Hz resolution
-#define FFT_SIZE 256  // Must be power of 2
+#define FFT_SIZE 512  // Must be power of 2
 #define FFT_OUTPUT_SIZE (FFT_SIZE / 2)  // Only positive frequencies (Nyquist)
 
 /**

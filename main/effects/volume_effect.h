@@ -35,6 +35,13 @@ void volume_effect_process(int32_t *samples, size_t index,
                            int32_t left_sample, int32_t right_sample);
 
 /**
+ * @brief Process batch of stereo samples with volume scaling (SIMD optimized)
+ * @param samples Interleaved stereo samples [L0,R0,L1,R1,...] (input/output)
+ * @param sample_count Total number of int32_t values (must be even for stereo pairs)
+ */
+void volume_effect_process_batch(int32_t *samples, size_t sample_count);
+
+/**
  * @brief Cleanup volume effect resources
  */
 void volume_effect_cleanup(void);

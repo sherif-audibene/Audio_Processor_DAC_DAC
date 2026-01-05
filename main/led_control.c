@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "dsps_dotprod.h"
 #include <math.h>
 #include <string.h>
 
@@ -13,6 +14,11 @@ static bool led_initialized = false;
 static led_control_config_t led_config;
 static float smoothed_intensity = 0.0f;
 
+// Buffer for RMS calculation (aligned for SIMD)
+#define LED_MAX_SAMPLES 1024
+__attribute__((aligned(16)))
+static float led_float_buffer[LED_MAX_SAMPLES];
+
 // Default configuration
 #define DEFAULT_LOW_THRESHOLD      0.1f    // 10% for green
 #define DEFAULT_MEDIUM_THRESHOLD   0.4f    // 40% for yellow
@@ -21,48 +27,50 @@ static float smoothed_intensity = 0.0f;
 
 /**
  * @brief Calculate RMS (Root Mean Square) intensity from audio samples
+ * Uses SIMD-optimized dot product for sum of squares calculation
  */
 static float calculate_rms_intensity(const int32_t *samples, size_t count) {
     if (samples == NULL || count == 0) {
         return 0.0f;
     }
 
-    int64_t sum_squares = 0;
-    int32_t peak = 0;
+    // Limit to buffer size
+    size_t samples_to_use = (count > LED_MAX_SAMPLES) ? LED_MAX_SAMPLES : count;
     
-    for (size_t i = 0; i < count; i++) {
+    // Convert int32 to float and track peak
+    int32_t peak = 0;
+    const float scale = 1.0f / 2147483647.0f;
+    
+    for (size_t i = 0; i < samples_to_use; i++) {
         int32_t sample = samples[i];
-        // Use absolute value for peak detection
+        // Track peak for responsive LEDs
         int32_t abs_sample = (sample < 0) ? -sample : sample;
         if (abs_sample > peak) {
             peak = abs_sample;
         }
-        sum_squares += (int64_t)sample * (int64_t)sample;
+        led_float_buffer[i] = (float)sample * scale;
     }
 
-    // Calculate RMS
-    float rms = sqrtf((float)sum_squares / (float)count);
+    // Use SIMD dot product to compute sum of squares (S3-optimized)
+    float sum_squares = 0.0f;
+    dsps_dotprod_f32(led_float_buffer, led_float_buffer, &sum_squares, samples_to_use);
     
-    // Normalize using both RMS and peak for better sensitivity
-    // For 24-bit audio: max value is 8388607 (2^23 - 1)
-    // For 32-bit signed: max value is 2147483647 (2^31 - 1)
-    // Use the larger range to be safe
-    float normalized_rms = rms / 2147483647.0f;
-    float normalized_peak = (float)peak / 2147483647.0f;
+    // Calculate RMS (already normalized)
+    float normalized_rms = sqrtf(sum_squares / (float)samples_to_use);
+    float normalized_peak = (float)peak * scale;
     
     // Use the larger of RMS or peak (scaled) for more responsive LEDs
     float normalized = (normalized_rms > normalized_peak * 0.5f) ? normalized_rms : (normalized_peak * 0.5f);
     
     // Apply logarithmic scaling for better visual response
     if (normalized > 0.0f) {
-        normalized = log10f(1.0f + normalized * 9.0f);  // Scale 0-1 to log10(1) to log10(10)
+        normalized = log10f(1.0f + normalized * 9.0f);
     }
     
     // Clamp to 0.0 - 1.0
     if (normalized > 1.0f) {
         normalized = 1.0f;
-    }
-    if (normalized < 0.0f) {
+    } else if (normalized < 0.0f) {
         normalized = 0.0f;
     }
 

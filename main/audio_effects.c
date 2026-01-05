@@ -16,27 +16,35 @@ void audio_effects_process(int32_t *samples, size_t sample_count) {
         return;
     }
 
-    // Process stereo samples (2 channels)
-    for (size_t i = 0; i < sample_count; i += 2) {
-        if (i + 1 >= sample_count) break;  // Ensure we have a stereo pair
-        
-        int32_t left_sample = samples[i];
-        int32_t right_sample = samples[i + 1];
-        
-        // Store original samples
-        int32_t orig_left = left_sample;
-        int32_t orig_right = right_sample;
-        
-        // Apply pitch shift first (needs original input)
-        if (current_config.enable_pitch_shift) {
+    // Check if pitch shift is enabled (requires sample-by-sample processing)
+    if (current_config.enable_pitch_shift) {
+        // Fall back to sample-by-sample processing when pitch shift is active
+        for (size_t i = 0; i < sample_count; i += 2) {
+            if (i + 1 >= sample_count) break;
+            
+            int32_t left_sample = samples[i];
+            int32_t right_sample = samples[i + 1];
+            
+            int32_t orig_left = left_sample;
+            int32_t orig_right = right_sample;
+            
+            // Apply pitch shift (sample-by-sample due to variable-rate interpolation)
             pitch_shift_effect_process(&left_sample, &right_sample, orig_left, orig_right);
+            
+            // Apply delay effect
+            delay_effect_process(&left_sample, &right_sample, left_sample, right_sample);
+            
+            // Apply volume and channel swap
+            volume_effect_process(samples, i, left_sample, right_sample);
         }
+    } else {
+        // OPTIMIZED PATH: Use SIMD batch processing when pitch shift is disabled
         
-        // Apply delay effect if enabled
-        delay_effect_process(&left_sample, &right_sample, left_sample, right_sample);
+        // Apply delay effect in batch (SIMD optimized)
+        delay_effect_process_batch(samples, sample_count);
         
-        // Apply volume and channel swap (always runs, writes to output buffer)
-        volume_effect_process(samples, i, left_sample, right_sample);
+        // Apply volume scaling in batch (SIMD optimized)
+        volume_effect_process_batch(samples, sample_count);
     }
 }
 

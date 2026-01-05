@@ -37,6 +37,13 @@ void delay_effect_process(int32_t *left_sample, int32_t *right_sample,
                           int32_t orig_left, int32_t orig_right);
 
 /**
+ * @brief Process batch of stereo samples through delay effect (SIMD optimized)
+ * @param samples Interleaved stereo samples [L0,R0,L1,R1,...] (input/output)
+ * @param sample_count Total number of int32_t values (must be even for stereo pairs)
+ */
+void delay_effect_process_batch(int32_t *samples, size_t sample_count);
+
+/**
  * @brief Cleanup delay effect resources
  */
 void delay_effect_cleanup(void);

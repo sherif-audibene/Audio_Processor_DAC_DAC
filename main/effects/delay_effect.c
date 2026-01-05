@@ -1,5 +1,7 @@
 #include "delay_effect.h"
 #include "esp_log.h"
+#include "dsps_add.h"
+#include "dsps_mulc.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -13,6 +15,15 @@ static bool initialized = false;
 static int32_t *delay_buffer = NULL;
 static size_t delay_buffer_size = 0;
 static size_t delay_write_pos = 0;
+
+// SIMD working buffers for batch processing
+#define DELAY_BATCH_SIZE 512
+__attribute__((aligned(16)))
+static float delay_float_in[DELAY_BATCH_SIZE];
+__attribute__((aligned(16)))
+static float delay_float_delayed[DELAY_BATCH_SIZE];
+__attribute__((aligned(16)))
+static float delay_float_out[DELAY_BATCH_SIZE];
 
 esp_err_t delay_effect_init(const delay_effect_config_t *init_config) {
     if (initialized) {
@@ -94,6 +105,74 @@ void delay_effect_process(int32_t *left_sample, int32_t *right_sample,
     delay_write_pos += 2;
     if (delay_write_pos >= delay_buffer_size) {
         delay_write_pos = 0;
+    }
+}
+
+void delay_effect_process_batch(int32_t *samples, size_t sample_count) {
+    if (!config.enable || delay_buffer == NULL || delay_buffer_size == 0) {
+        return;
+    }
+
+    // Calculate delay offset in samples (stereo pairs)
+    size_t delay_samples = (size_t)((config.delay_time_ms / 1000.0f) * EFFECT_SAMPLE_RATE * 2);
+    delay_samples = (delay_samples / 2) * 2;  // Ensure even number (stereo pairs)
+    
+    if (delay_samples > delay_buffer_size) {
+        delay_samples = delay_buffer_size;
+    }
+    if (delay_samples == 0) {
+        return;
+    }
+
+    // Process in chunks for SIMD efficiency
+    size_t processed = 0;
+    while (processed < sample_count) {
+        size_t chunk_size = sample_count - processed;
+        if (chunk_size > DELAY_BATCH_SIZE) {
+            chunk_size = DELAY_BATCH_SIZE;
+        }
+        // Ensure chunk is even (stereo pairs)
+        chunk_size = (chunk_size / 2) * 2;
+        if (chunk_size == 0) break;
+
+        // Convert input samples to float
+        for (size_t i = 0; i < chunk_size; i++) {
+            delay_float_in[i] = (float)samples[processed + i];
+        }
+
+        // Read delayed samples from circular buffer
+        for (size_t i = 0; i < chunk_size; i++) {
+            size_t read_pos = (delay_write_pos >= delay_samples) ?
+                              (delay_write_pos - delay_samples + i) :
+                              (delay_buffer_size - delay_samples + delay_write_pos + i);
+            if (read_pos >= delay_buffer_size) {
+                read_pos -= delay_buffer_size;
+            }
+            delay_float_delayed[i] = (float)delay_buffer[read_pos];
+        }
+
+        // SIMD: multiply delayed by mix factor
+        dsps_mulc_f32(delay_float_delayed, delay_float_delayed, chunk_size, config.mix, 1, 1);
+        
+        // SIMD: add input + (delayed * mix)
+        dsps_add_f32(delay_float_in, delay_float_delayed, delay_float_out, chunk_size, 1, 1, 1);
+
+        // Write to output and update delay buffer with feedback
+        for (size_t i = 0; i < chunk_size; i++) {
+            samples[processed + i] = (int32_t)delay_float_out[i];
+            
+            // Update delay buffer with feedback
+            int32_t feedback_sample = (int32_t)delay_float_in[i] + 
+                                      (int32_t)(delay_buffer[delay_write_pos] * config.feedback);
+            delay_buffer[delay_write_pos] = feedback_sample;
+            
+            delay_write_pos++;
+            if (delay_write_pos >= delay_buffer_size) {
+                delay_write_pos = 0;
+            }
+        }
+
+        processed += chunk_size;
     }
 }
 
