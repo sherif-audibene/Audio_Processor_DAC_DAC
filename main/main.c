@@ -51,6 +51,7 @@ static void wifi_connection_callback(bool connected, const char *ip_str) {
 void app_main(void) {
     ESP_LOGI(TAG, "Starting I2S Audio Passthrough Application with LCD Display and WiFi");
 
+
     // Initialize device parameters system
     ESP_LOGI(TAG, "Initializing device parameters...");
     esp_err_t ret = device_params_init();

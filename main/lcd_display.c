@@ -215,6 +215,13 @@ esp_err_t lcd_display_update(void) {
     
     esp_err_t ret;
     
+    // Reset start line to 0 every update to prevent vertical drift
+    // This fixes the issue where I2C noise can corrupt the start line register
+    ret = lcd_send_command(ST7567_CMD_SET_START_LINE | 0);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to reset start line");
+    }
+    
     // Write framebuffer to display page by page
     for (uint8_t page = 0; page < LCD_PAGES; page++) {
         // Set page address

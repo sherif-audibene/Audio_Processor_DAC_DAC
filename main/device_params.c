@@ -26,7 +26,7 @@ void device_params_get_defaults(device_params_t *params) {
     params->lcd.sda_pin = 6;
     params->lcd.scl_pin = 7;
     params->lcd.lcd_contrast = 20;
-    params->lcd.waveform.samples_per_screen = 256;
+    params->lcd.waveform.samples_per_screen = 4096;
     params->lcd.waveform.time_scale = 1;
     params->lcd.waveform.amplitude_scale = 100;
     params->lcd.waveform.show_grid = true;

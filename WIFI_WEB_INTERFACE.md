@@ -93,7 +93,7 @@ Update device configuration
   "lcd": {
     "lcd_contrast": 20,
     "waveform": {
-      "samples_per_screen": 256,
+      "samples_per_screen": 4096,
       "amplitude_scale": 100,
       "show_grid": true,
       "show_center_line": true
