@@ -662,15 +662,6 @@ static void lcd_display_task(void *pvParameters) {
             xSemaphoreTake(config_mutex, portMAX_DELAY);
             bool show_grid = current_waveform_config.show_grid;
             bool show_center = current_waveform_config.show_center_line;
-            xSemaphoreGive(config_mutex);
-            
-            // Draw grid if enabled
-            if (show_grid) {
-                draw_grid();
-            }
-            
-            // Get display mode
-            xSemaphoreTake(config_mutex, portMAX_DELAY);
             waveform_mode_t display_mode = current_waveform_config.mode;
             xSemaphoreGive(config_mutex);
             
@@ -679,10 +670,15 @@ static void lcd_display_task(void *pvParameters) {
                 // Draw spectral analyzer
                 draw_spectral_analyzer();
             } else if (display_mode == WAVEFORM_MODE_STATS) {
-                // Draw system stats
+                // Draw system stats (no grid for stats screen)
                 draw_stats_display();
             } else {
-                // Draw center line if enabled (only for waveform mode)
+                // Draw grid if enabled (waveform mode only)
+                if (show_grid) {
+                    draw_grid();
+                }
+                
+                // Draw center line if enabled
                 if (show_center) {
                     draw_center_line();
                 }
